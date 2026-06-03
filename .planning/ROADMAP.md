@@ -9,7 +9,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 ## Phases
 
 - [x] **Phase 1: Reader Foundation + Open-and-Inspect** - Open a `.mzpeak` (local/URL), read manifest + metadata, view any single spectrum; capability-detect and fail loud on unsupported encodings. (completed 2026-06-03)
-- [ ] **Phase 2: Imaging Grid Reconstruction (THE GATE)** - Reconstruct the spatial pixel grid from per-spectrum coordinates via a swappable strategy; gated on a real operator imaging file.
+- [x] **Phase 2: Imaging Grid Reconstruction (THE GATE)** - Reconstruct the spatial pixel grid from per-spectrum coordinates via a swappable strategy; gated on a real operator imaging file. (completed 2026-06-03)
 - [ ] **Phase 3: TIC Image + Pixel→Spectrum Round-Trip** - Render the default TIC spatial overview and complete the file→image→click→spectrum Core Value loop.
 - [ ] **Phase 4: Ion Image + Intensity Scaling** - Render a per-*m/z* ion image with Da/ppm tolerance, colormaps, and log/percentile scaling so images are never falsely blank.
 - [ ] **Phase 5: Worker Offload, Robustness & Static Deploy** - Offload compute to a Web Worker, finalize the error taxonomy, fail loud on unsupported encodings/non-imaging, and ship to GitHub Pages.
@@ -54,7 +54,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 - [x] 02-01-PLAN.md — reader CoordSource chain + run-geometry reader (IMG-01)
 - [x] 02-02-PLAN.md — sparse ImagingGrid builder + diagnostics (IMG-02, IMG-03)
 - [x] 02-03-PLAN.md — eager 'grid' LoadStage + GridDiagnosticsPanel + non-imaging notice (IMG-01/02/03 wired)
-- [ ] 02-04-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
+- [x] 02-04-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
 
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **Spec:** Build to imaging-mzpeak-spec v0.3 — see `.planning/research/IMAGING-SPEC-ALIGNMENT.md` (binding constraints C1–C8). Plannable now against the spec + synthetic fixtures; the converted PXD001283 `.mzpeak` is the **validation** input (no longer a precondition to start). Keep the CoordSource fallback chain since the spec is pre-merge into base mzPeak.
@@ -118,7 +118,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete    | 2026-06-03 |
-| 2. Imaging Grid Reconstruction (THE GATE) | 3/4 | In Progress|  |
+| 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete   | 2026-06-03 |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 0/? | Not started | - |
 | 4. Ion Image + Intensity Scaling | 0/? | Not started | - |
 | 5. Worker Offload, Robustness & Static Deploy | 0/? | Not started | - |
