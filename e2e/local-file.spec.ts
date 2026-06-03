@@ -82,10 +82,9 @@ test("loads a .mzpeak via file picker (page.setInputFiles) — asserts staged pr
 
   // The progress bar must show at least one step label for an active stage.
   // Accept zip-index, manifest, or metadata labels as valid intermediate signals.
-  const anyIntermediateLabel = page.getByTestId("loading-spinner");
-  // The spinner is only rendered during loading stages (not on "ready" or "idle").
-  // It's OK if it has already disappeared when we check — the progress bar itself
-  // is proof enough that a staged transition occurred.
+  // The spinner (data-testid="loading-spinner") is only rendered during loading
+  // stages (not on "ready" or "idle"). The progress bar itself is proof enough
+  // that a staged transition occurred.
   // Check if any stage-label-* elements are visible in the loading state:
   const stageLabels = [
     page.getByTestId("stage-label-zip-index"),
