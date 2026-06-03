@@ -4,8 +4,8 @@ milestone: v0.3
 milestone_name: milestone
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-06-03T18:23:31.697Z"
-last_activity: 2026-06-03 -- Phase 02 planning complete
+last_updated: "2026-06-03T18:24:38.933Z"
+last_activity: 2026-06-03 -- Phase 02 execution started
 progress:
   total_phases: 5
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Open an imaging mzPeak file in a browser → pick an *m/z* → see a correct ion image → click a pixel → see its spectrum.
-**Current focus:** Phase 1 — Reader Foundation + Open-and-Inspect
+**Current focus:** Phase 02 — imaging-grid-reconstruction-the-gate
 
 ## Current Position
 
-Phase: 2 of 5 (imaging grid reconstruction (the gate))
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-03 -- Phase 02 planning complete
+Phase: 02 (imaging-grid-reconstruction-the-gate) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 02
+Last activity: 2026-06-03 -- Phase 02 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
