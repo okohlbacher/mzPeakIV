@@ -482,16 +482,18 @@ The phase's final plan (`02-04` or equivalent) MUST mirror `01-04-PLAN.md`:
 
 **Note:** A2 is the only MEDIUM-risk assumption and is the reason the geometry-source chain (discovery → run-params → max-coord) and its diagnostics exist. The plan should explicitly test all three branches with synthetic geometry POJOs so a wrong A2 degrades gracefully rather than breaking the grid.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does the converted PXD001283 `.mzpeak` populate `ms_run.parameters`, or only `metadata.imaging`?**
    - What we know: spec §4.2 says both, with `ms_run.parameters` authoritative and the discovery block a denormalized copy.
    - What's unclear: whether the sibling `imzML2mzPeak` converter writes both today; only `metadata.imaging` is guaranteed-accessible through the vendored reader without the Pitfall-1 raw-JSON read.
    - Recommendation: Source geometry from the discovery block first (always accessible), add the raw-run-JSON read for the authoritative path, fall back to max-coord. Validate which source actually fired via `diagnostics.geometrySource` against PXD001283 when the file arrives.
+   - **RESOLVED:** Design is not blocked by this uncertainty. The three-branch geometry chain (discovery-block → raw-run-params JSON → max-coord derived) handles all cases correctly regardless of which the converter populates. `diagnostics.geometrySource` will empirically record which branch fired when PXD001283 arrives. No planning decision is deferred.
 
 2. **Should the run-geometry read live in `scanCoords.ts` or a separate `runParams.ts`?**
    - What we know: both are inside `src/reader/`, both satisfy the boundary. CONTEXT D-07 only names `scanCoords.ts`.
    - Recommendation: Planner's discretion — a small `readGridGeometry(reader)` helper colocated in `scanCoords.ts` keeps the reader-extension surface to one new file (matches D-07 spirit). Split only if it grows.
+   - **RESOLVED:** `readGridGeometry` is colocated in `scanCoords.ts` per D-07. The plans implement it this way (plan 02-01). No split needed at Phase 2 scale.
 
 ## Environment Availability
 
