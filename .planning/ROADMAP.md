@@ -38,25 +38,25 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 **Depends on**: Phase 1
 **Requirements**: IMG-01, IMG-02, IMG-03
 **Success Criteria** (what must be TRUE):
-  1. App reconstructs per-spectrum x/y coordinates via a swappable `CoordSource` strategy (default: imzML `IMS:1000050`/`IMS:1000051` cvParams, with auto-detecting probes for promoted columns / scan-settings / id-parsing), logs which strategy won, and keys on accession not column name.
-  2. App exposes grid geometry — x/y extents, width×height, pixel-presence mask (sparse vs dense), and a coordinate↔spectrum-index lookup — built once per file and normalized to a 0-based dense internal index while preserving original coords.
-  3. App surfaces a grid-diagnostics panel: detected dimensions, unique-coord count vs spectrum count, filled/total ratio, and missing/duplicate pixels, so a user can sanity-check reconstruction.
-  4. The reconstructed grid is verified correct against the operator's real imaging `.mzpeak` (correct dimensions, no transpose/flip, unique-coord count matches spectrum count) — this is the milestone gate.
+  1. App reconstructs per-spectrum x/y coordinates per imaging-spec v0.3 — primary: the promoted `scan` columns `IMS_1000050_position_x` / `IMS_1000051_position_y` (`Int64`, 1-based, authoritative), keyed on accession — via a swappable `CoordSource` chain (cvParams in `scan.parameters` and id-parse as fallbacks); logs which strategy won; accepts Int64 or UInt32.
+  2. App exposes grid geometry — extent from declared `IMS:1000042/43` pixel counts (fallback: coord max), width×height, pixel-presence mask (sparse vs dense), coordinate↔spectrum-index lookup, 1-based→0-based normalization (reading `coordinate_base`), and pixel aspect from `IMS:1000046/47` — built once per file, original coords preserved. The `mzpeak_index.json.metadata.imaging` discovery block is used as a fast path and cross-checked against the authoritative columns/params.
+  3. App surfaces a grid-diagnostics panel: detected dimensions, unique-coord count vs spectrum count, filled/total ratio, missing/duplicate pixels, and any discovery-vs-authoritative disagreement, so a user can sanity-check reconstruction.
+  4. The reconstructed grid is validated against PXD001283 once converted (expected 260×134, no transpose, unique-coord count == spectrum count == 34,840). Until that file exists, validation uses synthetic known-grid fixtures built to the spec.
   5. A valid non-imaging (LC-MS) file is reported distinctly as "no spatial coordinates found — not imaging data," not as a broken file.
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
-**Gate:** Blocked on the operator supplying a real imaging `.mzpeak`. Plan this phase with `--research-phase` (discovery/validation against the real file).
+**Spec:** Build to imaging-mzpeak-spec v0.3 — see `.planning/research/IMAGING-SPEC-ALIGNMENT.md` (binding constraints C1–C8). Plannable now against the spec + synthetic fixtures; the converted PXD001283 `.mzpeak` is the **validation** input (no longer a precondition to start). Keep the CoordSource fallback chain since the spec is pre-merge into base mzPeak.
 **UI hint**: yes
 
 ### Phase 3: TIC Image + Pixel→Spectrum Round-Trip
 **Goal**: A user sees a TIC spatial overview the moment an imaging file loads, can click any pixel, and sees that pixel's full spectrum — completing the Core Value round-trip with minimal surface and validating the grid→sum→rasterize→paint→hit-test pipeline.
 **Mode:** mvp
 **Depends on**: Phase 2
-**Requirements**: IMAGE-01, IMAGE-04, SPEC-01, SPEC-02
+**Requirements**: IMAGE-01, IMAGE-04, SPEC-01, SPEC-02, DATA-03
 **Success Criteria** (what must be TRUE):
   1. App renders a TIC (total-ion-current) image as the default spatial overview immediately after grid reconstruction.
-  2. Hovering the image shows the pixel's x/y and intensity readout; the rendered image respects correct y-orientation and pixel aspect ratio (flip-Y / pixel-size handled, validated against the operator's reference).
-  3. Clicking a pixel displays that pixel's full spectrum in a fast uPlot chart with zoom/pan.
+  2. Hovering the image shows the pixel's (1-based) x/y and intensity readout; the image renders with the spec's **fixed** orientation (`M[row][col]`, col=x, row=y, (1,1) top-left, y-down, NO flip/transpose; scan-direction terms ignored) and respects pixel aspect from `IMS:1000046/47`.
+  3. Clicking a pixel displays that pixel's full spectrum in a fast uPlot chart with zoom/pan, reading from the correct signal file (`spectra_data` profile / `spectra_peaks` centroid) per `MS_1000525` (DATA-03).
   4. Missing pixels (sparse acquisitions) render distinctly from genuine zero-intensity pixels using the presence mask.
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
@@ -104,13 +104,14 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 
 ## Coverage
 
-All 19 v1 requirements mapped to exactly one phase. No orphans, no duplicates.
+All 20 v1 requirements mapped to exactly one phase. No orphans, no duplicates. (DATA-03 added 2026-06-03 from imaging-spec alignment.)
 
 | Category | Requirements | Phase |
 |----------|--------------|-------|
 | LOAD | LOAD-01, LOAD-02, LOAD-03 | 1 |
 | FMT | FMT-01, FMT-02, FMT-03, FMT-04 | 1 |
 | DATA | DATA-01, DATA-02 | 1 |
+| DATA | DATA-03 (signal-file routing profile/centroid) | 3 |
 | IMG | IMG-01, IMG-02, IMG-03 | 2 |
 | IMAGE | IMAGE-01, IMAGE-04 | 3 |
 | IMAGE | IMAGE-02, IMAGE-03 | 4 |

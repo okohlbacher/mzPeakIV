@@ -18,15 +18,15 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 - [ ] **FMT-04**: App detects and reports the file's capabilities/layout (point vs chunked, encodings present) and whether it contains imaging data.
 
 ### Imaging Model (IMG)
-- [ ] **IMG-01**: App reconstructs the spatial pixel grid by extracting per-spectrum x/y coordinates, via a swappable coordinate-extraction strategy (default: imzML `IMS:1000050`/`IMS:1000051` cvParams), validated against the operator's real imaging file.
-- [ ] **IMG-02**: App computes and exposes grid geometry: x/y extents, pixel-presence mask (sparse vs dense), and a coordinate→spectrum-index lookup.
+- [ ] **IMG-01**: App reconstructs the spatial pixel grid by extracting per-spectrum x/y coordinates from the **promoted `scan` columns** `IMS_1000050_position_x` / `IMS_1000051_position_y` (`Int64`, 1-based, authoritative) per imaging-spec v0.3, keyed on accession via a swappable CoordSource chain (columns primary; `scan.parameters` cvParams and spectrum-id parse as fallbacks). Validated against PXD001283.
+- [ ] **IMG-02**: App computes and exposes grid geometry: extent from declared `IMS:1000042/43` pixel counts (falling back to coord max), pixel-presence mask (sparse vs dense), coordinate→spectrum-index lookup, 1-based→0-based normalization (reading `coordinate_base`), and pixel aspect ratio from `IMS:1000046/47` (µm).
 - [ ] **IMG-03**: App surfaces grid diagnostics (detected dimensions, pixel count vs spectrum count, missing/duplicate pixels) so a user can sanity-check reconstruction.
 
 ### Spatial Images (IMAGE)
 - [ ] **IMAGE-01**: App renders a TIC (total-ion-current) image as the default spatial overview.
 - [ ] **IMAGE-02**: App renders an ion image for a user-entered *m/z* with a tolerance specified in either Da or ppm.
 - [ ] **IMAGE-03**: User can choose a colormap and an intensity scaling mode (linear / log) with percentile clipping, so images are not blank on high-dynamic-range data.
-- [ ] **IMAGE-04**: Hovering the image shows the pixel's x/y and intensity readout; the rendered image respects correct y-orientation and pixel aspect ratio.
+- [ ] **IMAGE-04**: Hovering the image shows the pixel's (1-based) x/y and intensity readout; the image renders with the spec's **fixed mandatory orientation** — `M[row][col]`, col=x, row=y, pixel (1,1) top-left, y increasing downward, **no flip/transpose**, scan-direction terms ignored for display — and respects pixel aspect ratio from `IMS:1000046/47`.
 
 ### Spectrum View (SPEC)
 - [ ] **SPEC-01**: Clicking a pixel displays that pixel's full spectrum in a fast plot (uPlot) with zoom/pan.
@@ -35,6 +35,7 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 ### Signal Data (DATA)
 - [ ] **DATA-01**: App correctly reads the point layout and the chunked layout with delta encoding, reconstructing m/z and intensity arrays.
 - [ ] **DATA-02**: App detects unsupported encodings/storage (MS-Numpress, auxiliary arrays, directory storage) and fails loudly with a named, actionable error rather than rendering silent/incorrect data.
+- [ ] **DATA-03**: App reads each spectrum's signal (for the per-pixel spectrum view and ion-image aggregation) from the correct file per `MS_1000525_spectrum_representation` — profile → `spectra_data.parquet`, centroid → `spectra_peaks.parquet` — never assuming `spectra_data`.
 
 ### Errors & Robustness (UX)
 - [ ] **UX-01**: App distinguishes and clearly communicates the three failure classes: "not an imaging file", "unsupported encoding/feature", and "corrupt/unreadable file".
@@ -69,6 +70,7 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | FMT-04 | Phase 1 | Pending |
 | DATA-01 | Phase 1 | Pending |
 | DATA-02 | Phase 1 | Pending |
+| DATA-03 | Phase 3 | Pending |
 | IMG-01 | Phase 2 | Pending |
 | IMG-02 | Phase 2 | Pending |
 | IMG-03 | Phase 2 | Pending |

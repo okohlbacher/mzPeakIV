@@ -38,7 +38,7 @@ Out of scope (later phases): pixel-grid reconstruction (P2), TIC image + pixel�
 - Manifest: list each Parquet entity (name, entity_type, data_kind) from `mzpeak_index.json` (FMT-01).
 - File-level metadata (from Parquet key-value JSON): file_description, instrument_configuration_list, software_list, run, sample_list (FMT-02).
 - Stats: number of spectra/entities, m/z range if available, MS levels present (FMT-03).
-- Capability readout: point vs chunked layout, encodings present (from `spectrum_array_index` / `chunk_encoding`), and **whether imaging data is detected** (presence of spatial cvParams — a boolean probe here; full reconstruction is P2) (FMT-04).
+- Capability readout: point vs chunked layout, encodings present (from `spectrum_array_index` / `chunk_encoding`), and **whether imaging data is detected** — a boolean probe per imaging-spec v0.3: presence of the promoted `scan` columns `IMS_1000050_position_x` / `IMS_1000051_position_y` (authoritative) and/or `mzpeak_index.json.metadata.imaging.is_imaging` (discovery). Full grid reconstruction is P2. Also note per-spectrum `MS_1000525_spectrum_representation` (profile/centroid) for later signal-file routing (DATA-03, P3). See `.planning/research/IMAGING-SPEC-ALIGNMENT.md`. (FMT-04)
 
 ### Single spectrum view
 - User selects a spectrum by index → reconstructed m/z + intensity arrays plotted in uPlot (DATA-01).
