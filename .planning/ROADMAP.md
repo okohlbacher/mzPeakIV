@@ -17,77 +17,92 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 ## Phase Details
 
 ### Phase 1: Reader Foundation + Open-and-Inspect
+
 **Goal**: A user can open any `.mzpeak` (imaging or not) from a local file or a URL, see the manifest, file-level metadata, and per-file stats, and view a single spectrum — proving the vendored reader works in-browser independently of the coordinate-grid risk.
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
 **Requirements**: LOAD-01, LOAD-02, LOAD-03, FMT-01, FMT-02, FMT-03, FMT-04, DATA-01, DATA-02
 **Success Criteria** (what must be TRUE):
+
   1. User can open a local `.mzpeak` via file picker and drag-drop, and open a remote `.mzpeak` from a URL, with staged progress shown at each stage (ZIP index → manifest → metadata loaded) — no silent long pause.
   2. User sees the parsed `mzpeak_index.json` manifest as a list of contained Parquet entities (name, entity_type, data_kind), plus file description, instrument config, software, run, and sample metadata.
   3. User sees per-file stats: spectrum/entity counts, m/z range if available, MS levels present, and a capabilities readout (point vs chunked layout, encodings present, whether imaging data is detected).
   4. User can select any spectrum by index and see its reconstructed m/z + intensity arrays plotted (point and chunked-with-delta layouts both reconstruct correctly).
   5. Opening a file using an unsupported encoding/storage (MS-Numpress, auxiliary arrays, directory storage) produces a named, actionable error and never renders silent zeros as if they were real data.
+
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **Setup:** Bootstrap the Codex review harness `tools/codex_review.sh` (round1/round2 per PROC-01) as part of this phase's project scaffold, so Phase 1 itself — and every later phase — is adversarially reviewed.
 **UI hint**: yes
 
 ### Phase 2: Imaging Grid Reconstruction (THE GATE)
+
 **Goal**: A user can load an imaging `.mzpeak` and see a verified spatial pixel grid — extents, dimensions, presence mask, and diagnostics — reconstructed via a swappable coordinate-extraction strategy that is validated against the operator's real imaging file before anything is rendered on top of it.
 **Mode:** mvp
 **Depends on**: Phase 1
 **Requirements**: IMG-01, IMG-02, IMG-03
 **Success Criteria** (what must be TRUE):
+
   1. App reconstructs per-spectrum x/y coordinates per imaging-spec v0.3 — primary: the promoted `scan` columns `IMS_1000050_position_x` / `IMS_1000051_position_y` (`Int64`, 1-based, authoritative), keyed on accession — via a swappable `CoordSource` chain (cvParams in `scan.parameters` and id-parse as fallbacks); logs which strategy won; accepts Int64 or UInt32.
   2. App exposes grid geometry — extent from declared `IMS:1000042/43` pixel counts (fallback: coord max), width×height, pixel-presence mask (sparse vs dense), coordinate↔spectrum-index lookup, 1-based→0-based normalization (reading `coordinate_base`), and pixel aspect from `IMS:1000046/47` — built once per file, original coords preserved. The `mzpeak_index.json.metadata.imaging` discovery block is used as a fast path and cross-checked against the authoritative columns/params.
   3. App surfaces a grid-diagnostics panel: detected dimensions, unique-coord count vs spectrum count, filled/total ratio, missing/duplicate pixels, and any discovery-vs-authoritative disagreement, so a user can sanity-check reconstruction.
   4. The reconstructed grid is validated against PXD001283 once converted (expected 260×134, no transpose, unique-coord count == spectrum count == 34,840). Until that file exists, validation uses synthetic known-grid fixtures built to the spec.
   5. A valid non-imaging (LC-MS) file is reported distinctly as "no spatial coordinates found — not imaging data," not as a broken file.
+
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **Spec:** Build to imaging-mzpeak-spec v0.3 — see `.planning/research/IMAGING-SPEC-ALIGNMENT.md` (binding constraints C1–C8). Plannable now against the spec + synthetic fixtures; the converted PXD001283 `.mzpeak` is the **validation** input (no longer a precondition to start). Keep the CoordSource fallback chain since the spec is pre-merge into base mzPeak.
 **UI hint**: yes
 
 ### Phase 3: TIC Image + Pixel→Spectrum Round-Trip
+
 **Goal**: A user sees a TIC spatial overview the moment an imaging file loads, can click any pixel, and sees that pixel's full spectrum — completing the Core Value round-trip with minimal surface and validating the grid→sum→rasterize→paint→hit-test pipeline.
 **Mode:** mvp
 **Depends on**: Phase 2
 **Requirements**: IMAGE-01, IMAGE-04, SPEC-01, SPEC-02, DATA-03
 **Success Criteria** (what must be TRUE):
+
   1. App renders a TIC (total-ion-current) image as the default spatial overview immediately after grid reconstruction.
   2. Hovering the image shows the pixel's (1-based) x/y and intensity readout; the image renders with the spec's **fixed** orientation (`M[row][col]`, col=x, row=y, (1,1) top-left, y-down, NO flip/transpose; scan-direction terms ignored) and respects pixel aspect from `IMS:1000046/47`.
   3. Clicking a pixel displays that pixel's full spectrum in a fast uPlot chart with zoom/pan, reading from the correct signal file (`spectra_data` profile / `spectra_peaks` centroid) per `MS_1000525` (DATA-03).
   4. Missing pixels (sparse acquisitions) render distinctly from genuine zero-intensity pixels using the presence mask.
+
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
 
 ### Phase 4: Ion Image + Intensity Scaling
+
 **Goal**: A user can enter an *m/z* with a Da or ppm tolerance and see a correct ion image, choose colormaps and linear/log + percentile-clip scaling, and see the selected *m/z* window marked on the clicked-pixel spectrum — the headline deliverable, layered on the proven TIC pipeline.
 **Mode:** mvp
 **Depends on**: Phase 3
 **Requirements**: IMAGE-02, IMAGE-03, SPEC-02
 **Success Criteria** (what must be TRUE):
+
   1. User enters an *m/z* and a tolerance in either Da or ppm (ppm→Da converted at the center *m/z*, unit-tested) and sees the corresponding ion image, computed via the reader's existing `extractXIC`.
   2. User can choose a colormap and an intensity-scaling mode (linear / log) with percentile clipping, so high-dynamic-range images are not falsely blank; the colorbar is labeled with the aggregation statistic and scale mode.
   3. App shows the nonzero-pixel count and value-range (and/or histogram) so "blank because scaling" is never confused with "blank because absent."
   4. The currently selected *m/z* ± tolerance window is visually marked on the clicked-pixel spectrum.
   5. Changing colormap or scale recolors the cached raster without re-querying the file.
+
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
 
 ### Phase 5: Worker Offload, Robustness & Static Deploy
+
 **Goal**: The app stays responsive on real-scale files by running the reader+grid+builders in a Web Worker, communicates all three failure classes clearly, and is publicly usable as a static GitHub Pages site.
 **Mode:** mvp
 **Depends on**: Phase 4
 **Requirements**: UX-01
 **Success Criteria** (what must be TRUE):
+
   1. Reader + grid + ion-image/TIC compute run inside a Web Worker (rasters transferred zero-copy); *m/z*/tolerance controls are debounced and the UI stays responsive while images recompute on a real-scale file.
   2. The three failure classes are distinct and actionable: "not an imaging file (no spatial coords)", "unsupported encoding/feature (named)", and "corrupt/unreadable file" — each with a different suggested action.
   3. Unsupported encodings (Numpress/aux/directory) fail loud with a named error, consistent with the Phase 1 capability check, including in the worker path.
   4. The app builds and deploys as a static site to GitHub Pages (correct `base`, hashed `.wasm` asset, no COOP/COEP needed) and the full Core Value round-trip works from the deployed URL.
   5. The Codex review harness `tools/codex_review.sh` (bootstrapped in Phase 1) is finalized/hardened and supports `round1`/`round2 <phase>` per the PROC-01 convention.
+
 **Plans**: TBD
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
@@ -96,7 +111,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Reader Foundation + Open-and-Inspect | 0/? | Not started | - |
+| 1. Reader Foundation + Open-and-Inspect | 2/4 | In Progress|  |
 | 2. Imaging Grid Reconstruction (THE GATE) | 0/? | Not started | - |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 0/? | Not started | - |
 | 4. Ion Image + Intensity Scaling | 0/? | Not started | - |
@@ -123,6 +138,7 @@ All 20 v1 requirements mapped to exactly one phase. No orphans, no duplicates. (
 ## Process (applies to every phase)
 
 Each phase is bracketed by a **Codex CLI adversarial review** (PROC-01 convention):
+
 - **round1** — adversarial read of the phase plan before execution: `tools/codex_review.sh round1 <phase>`
 - **round2** — adversarial read of the phase diff after execution: `tools/codex_review.sh round2 <phase> --sha <phase_start_sha>`
 
