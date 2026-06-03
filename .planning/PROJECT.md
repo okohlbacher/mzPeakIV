@@ -14,7 +14,13 @@ It is a *format-exploration and orientation tool*, not a full analysis suite. Th
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Load an mzPeak file from a local file picker (drag-drop / file input) — Phase 1
+- [x] Load an mzPeak file from a URL (HTTP range-friendly) — Phase 1
+- [x] Parse the ZIP archive + `mzpeak_index.json` manifest and list contained Parquet entities — Phase 1
+- [x] Read and display file-level metadata and spectrum counts — Phase 1
+- [x] Detect imaging data and reconstruct the pixel grid from per-spectrum spatial coordinates — Phase 2
+- [x] Render a TIC (total-ion-current) image as the default spatial overview — Phase 3
+- [x] Click a pixel to view its full spectrum (signal-file routing by MS:1000525) — Phase 3
 
 ### Active
 
@@ -87,4 +93,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-03 after initialization*
+*Last updated: 2026-06-03 after Phase 3 completion*
