@@ -21,9 +21,9 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 
 ### Imaging Model (IMG)
 
-- [ ] **IMG-01**: App reconstructs the spatial pixel grid by extracting per-spectrum x/y coordinates from the **promoted `scan` columns** `IMS_1000050_position_x` / `IMS_1000051_position_y` (`Int64`, 1-based, authoritative) per imaging-spec v0.3, keyed on accession via a swappable CoordSource chain (columns primary; `scan.parameters` cvParams and spectrum-id parse as fallbacks). Validated against PXD001283.
-- [ ] **IMG-02**: App computes and exposes grid geometry: extent from declared `IMS:1000042/43` pixel counts (falling back to coord max), pixel-presence mask (sparse vs dense), coordinate→spectrum-index lookup, 1-based→0-based normalization (reading `coordinate_base`), and pixel aspect ratio from `IMS:1000046/47` (µm).
-- [ ] **IMG-03**: App surfaces grid diagnostics (detected dimensions, pixel count vs spectrum count, missing/duplicate pixels) so a user can sanity-check reconstruction.
+- [x] **IMG-01**: App reconstructs the spatial pixel grid by extracting per-spectrum x/y coordinates from the **promoted `scan` columns** `IMS_1000050_position_x` / `IMS_1000051_position_y` (`Int64`, 1-based, authoritative) per imaging-spec v0.3, keyed on accession via a swappable CoordSource chain (columns primary; `scan.parameters` cvParams and spectrum-id parse as fallbacks). Validated against PXD001283.
+- [x] **IMG-02**: App computes and exposes grid geometry: extent from declared `IMS:1000042/43` pixel counts (falling back to coord max), pixel-presence mask (sparse vs dense), coordinate→spectrum-index lookup, 1-based→0-based normalization (reading `coordinate_base`), and pixel aspect ratio from `IMS:1000046/47` (µm).
+- [x] **IMG-03**: App surfaces grid diagnostics (detected dimensions, pixel count vs spectrum count, missing/duplicate pixels) so a user can sanity-check reconstruction.
 
 ### Spatial Images (IMAGE)
 
@@ -78,9 +78,9 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Complete |
 | DATA-03 | Phase 3 | Pending |
-| IMG-01 | Phase 2 | Pending |
-| IMG-02 | Phase 2 | Pending |
-| IMG-03 | Phase 2 | Pending |
+| IMG-01 | Phase 2 | Complete |
+| IMG-02 | Phase 2 | Complete |
+| IMG-03 | Phase 2 | Complete |
 | IMAGE-01 | Phase 3 | Pending |
 | IMAGE-04 | Phase 3 | Pending |
 | SPEC-01 | Phase 3 | Pending |
