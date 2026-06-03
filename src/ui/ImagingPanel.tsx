@@ -88,7 +88,8 @@ export function ImagingPanel() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const rgba = rasterizeTic(tic, grid);
-    const img = new ImageData(rgba, grid.width, grid.height);
+    const img = new ImageData(grid.width, grid.height);
+    img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
   }, [tic, grid]);
 
@@ -101,7 +102,9 @@ export function ImagingPanel() {
     if (!ctx) return;
     // putImageData overwrites the composite, so re-blit before stroking the ring.
     const rgba = rasterizeTic(tic, grid);
-    ctx.putImageData(new ImageData(rgba, grid.width, grid.height), 0, 0);
+    const img = new ImageData(grid.width, grid.height);
+    img.data.set(rgba);
+    ctx.putImageData(img, 0, 0);
 
     if (selectedIndex == null) return;
     const key = keyForSpectrumIndex(grid, selectedIndex);

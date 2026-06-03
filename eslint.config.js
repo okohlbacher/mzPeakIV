@@ -5,8 +5,16 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
   {
-    // Never lint build output, deps, or the vendored upstream reader source.
-    ignores: ["dist", "node_modules", "vendor", "playwright-report", "test-results"],
+    // Never lint build output, deps, the vendored upstream reader source, or
+    // transient Claude Code executor worktrees (which carry their own vendor/ copy).
+    ignores: [
+      "dist",
+      "node_modules",
+      "vendor",
+      "playwright-report",
+      "test-results",
+      ".claude/worktrees",
+    ],
   },
   {
     files: ["**/*.{ts,tsx}"],

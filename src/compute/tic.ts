@@ -20,7 +20,15 @@ const INTENSITY_KEY = "intensity array";
  */
 interface XicPointLike {
   index: bigint | number;
-  dataArrays: Record<string, ArrayLike<number> | undefined>;
+  // The reader's `dataArrays` is keyed by CV name and can structurally carry
+  // numeric OR string arrays (e.g. label columns). We accept both shapes so the
+  // reader's `XIC` is assignable WITHOUT importing any Arrow/mzpeakts type here
+  // (one-way boundary). Only the numeric intensity array is ever read below, and
+  // the `Number.isFinite` guard coerces any non-number element to 0.
+  dataArrays: Record<
+    string,
+    ArrayLike<number> | ArrayLike<string> | undefined
+  >;
 }
 
 /** Minimal structural shape of an XIC (the `extractXIC` return). */
@@ -65,7 +73,10 @@ export function buildTic(xic: XicLike, grid: ImagingGrid): Float32Array {
     let sum = 0;
     for (let i = 0; i < arr.length; i++) {
       const v = arr[i];
-      sum += Number.isFinite(v) ? v : 0; // non-finite element → 0 (T-03-01).
+      // Coerce defensively: a numeric intensity element stays itself; any
+      // non-finite or non-number element (NaN/Infinity/string) → 0 (T-03-01).
+      const n = typeof v === "number" ? v : Number(v);
+      sum += Number.isFinite(n) ? n : 0;
     }
     tic[key] = sum;
   }

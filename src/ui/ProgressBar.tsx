@@ -6,6 +6,7 @@ const STAGES: LoadStage[] = [
   "manifest",
   "metadata",
   "grid",
+  "tic",
   "ready",
 ];
 
@@ -15,6 +16,7 @@ const STAGE_LABEL: Record<LoadStage, string> = {
   manifest: "Parsing manifest…",
   metadata: "Loading metadata…",
   grid: "Building imaging grid…",
+  tic: "Rendering TIC image…",
   ready: "Ready",
   error: "Error",
 };
@@ -32,7 +34,8 @@ export function ProgressBar({ stage }: Props) {
     stage === "zip-index" ||
     stage === "manifest" ||
     stage === "metadata" ||
-    stage === "grid";
+    stage === "grid" ||
+    stage === "tic";
   const isError = stage === "error";
   const isIdle = stage === "idle";
 
