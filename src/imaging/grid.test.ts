@@ -230,23 +230,25 @@ test.skipIf(!existsSync(PXD))(
     const { extractCoords, readGridGeometry } = (await import(
       /* @vite-ignore */ scanCoordsPath
     )) as {
-      extractCoords: (r: unknown) => { x: number; y: number }[] | null;
+      extractCoords: (r: unknown) => { coords: { x: number; y: number }[]; spectrumIndices: number[]; strategy: string } | null;
       readGridGeometry: (r: unknown) => GridGeometry;
     };
     const { readFile } = await import("node:fs/promises");
 
     const bytes = await readFile(PXD);
     const reader = await openBlob(new Blob([bytes]));
-    const coords = extractCoords(reader);
-    expect(coords).not.toBeNull();
-    if (!coords) return;
+    const result = extractCoords(reader);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    // Use the source_index-joined spectrumIndices from CoordResult — do NOT synthesize by array index.
+    const { coords, spectrumIndices, strategy } = result;
+    expect(strategy).toBe("promoted-columns");
     const geom = readGridGeometry(reader);
-    const spectrumIndices = coords.map((_, i) => i);
     const grid = buildImagingGrid(
       coords,
       spectrumIndices,
       geom,
-      "promoted-columns",
+      strategy,
     );
     expect(grid).not.toBeNull();
     if (!grid) return;

@@ -37,8 +37,10 @@ export function GridDiagnosticsPanel() {
 
   if (!capabilities) return null;
 
-  // Non-imaging branch: calm muted notice, no diagnostics affordances.
-  if (grid === null) {
+  // Non-imaging branch: calm muted notice when the file has no spatial coordinates (D-04).
+  // Guard on capabilities.isImaging === false to distinguish "not imaging data" from
+  // "imaging file where grid building failed" (the latter shows nothing until an error surfaces).
+  if (grid === null && capabilities.isImaging === false) {
     return (
       <section
         aria-label="grid-panel"
@@ -52,6 +54,10 @@ export function GridDiagnosticsPanel() {
       </section>
     );
   }
+
+  // Grid is null but file is (or may be) imaging — building may still be in progress or failed.
+  // Return null to avoid a misleading "not imaging" notice; store.error surfaces failures.
+  if (grid === null) return null;
 
   const { width, height, filledCount, totalCells, pixelSizeUm, diagnostics } =
     grid;

@@ -85,6 +85,12 @@ export function buildImagingGrid(
 
   let duplicateCount = 0;
   const n = Math.min(coords.length, spectrumIndices.length);
+  if (coords.length !== spectrumIndices.length) {
+    // Mismatch is a caller bug; surface it in diagnostics rather than silently truncating.
+    console.warn(
+      `buildImagingGrid: coords.length (${coords.length}) !== spectrumIndices.length (${spectrumIndices.length}); processing ${n} pairs`,
+    );
+  }
   for (let i = 0; i < n; i++) {
     const x0 = coords[i].x - coordinateBase;
     const y0 = coords[i].y - coordinateBase;
@@ -93,7 +99,7 @@ export function buildImagingGrid(
     if (x0 < 0 || x0 >= width || y0 < 0 || y0 >= height) {
       continue;
     }
-    const key = x0 * width + y0;
+    const key = y0 * width + x0; // row-major: row=y, col=x (C2: col=position_x, row=position_y)
     if (coordToSpectrumIndex.has(key)) {
       // Keep the first writer; do not silently overwrite (Pattern 2).
       duplicateCount++;
