@@ -177,3 +177,18 @@ Remaining Codex round-2 findings after pass 1:
 10. [Non-actionable] Untracked vendor artifact reproducibility note (worktree environment issue)
 
 Awaiting operator adjudication per PROC-01.
+
+## Operator Adjudication — Final
+
+**Verdict:** `approved` — operator accepted Codex round-2 `reject` after 3 gap-closure passes.
+
+All substantive code defects addressed:
+- Grid key formula (critical), PXD unlock test API, non-imaging notice guard
+- NaN coordinate guard, oobCount field, source_index absent warning
+- coordinate_base-only discovery block preservation
+- Geometry dimension validation, fractional coord floor, spectrumCount accuracy
+- Imaging grid-build failure surfaces as named error (not silent null)
+
+Remaining Codex concerns acknowledged as non-code (ROADMAP tracking state, worktree vendor-artifact note).
+
+Phase 2 is declared **closed**.
