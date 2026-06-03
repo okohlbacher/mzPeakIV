@@ -92,3 +92,10 @@ None. Both functions are fully wired against the real reader access paths (verif
 ## Threat Flags
 
 None. No new network endpoints, auth paths, or trust boundaries introduced. The single file-metadata→parser boundary is the one already declared in the plan's threat model; the id-parse ReDoS mitigation (T-02-01-RD) and the bigint-leak mitigation (T-02-01-LEAK) are both implemented and tested.
+
+## Self-Check: PASSED
+
+- FOUND: src/reader/scanCoords.ts
+- FOUND: src/reader/scanCoords.test.ts
+- FOUND: .planning/phases/02-imaging-grid-reconstruction-the-gate/02-01-SUMMARY.md
+- FOUND commit c2173f9 (RED), 72354c3 (GREEN), 30758f4 (SUMMARY)
