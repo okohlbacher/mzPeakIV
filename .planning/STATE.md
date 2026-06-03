@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.3
 milestone_name: milestone
 status: Codex round1 + round2 both accept-with-revisions; operator adjudication required before phase close
-stopped_at: Phase 3 Codex gate (03-04) — both rounds accept-with-revisions, awaiting operator adjudication
-last_updated: "2026-06-03T21:41:52.733Z"
+stopped_at: Phase 4 context gathered
+last_updated: "2026-06-03T21:58:04.657Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 5
@@ -95,6 +95,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-03T21:17:00.366Z
-Stopped at: Phase 3 Codex gate (03-04) — both rounds accept-with-revisions, awaiting operator adjudication
-Resume file: .planning/phases/03-tic-image-pixel-spectrum-round-trip/03-04-SUMMARY.md
+Last session: 2026-06-03T21:58:04.653Z
+Stopped at: Phase 4 context gathered
+Resume file: .planning/phases/04-ion-image-intensity-scaling/04-CONTEXT.md
