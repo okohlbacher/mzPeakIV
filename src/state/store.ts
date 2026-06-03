@@ -8,6 +8,7 @@ import {
 } from "../reader/fileMeta";
 import { getSpectrumArrays } from "../reader/arrays";
 import type {
+  Capabilities,
   FileMeta,
   FileStats,
   LoadStage,
@@ -26,6 +27,9 @@ type State = {
   fileMeta: FileMeta | null;
   manifest: ManifestEntry[];
   stats: FileStats | null;
+  // Declared in the 01-01 reader interface; populated by 01-02 (layout/encodings/
+  // imaging-detected) and 01-03 (unsupported findings). Null until then.
+  capabilities: Capabilities | null;
   stage: LoadStage;
   error: string | null;
   selectedIndex: number | null;
@@ -42,6 +46,7 @@ const initialState: State = {
   fileMeta: null,
   manifest: [],
   stats: null,
+  capabilities: null,
   stage: "idle",
   error: null,
   selectedIndex: null,

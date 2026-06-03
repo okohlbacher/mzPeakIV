@@ -20,9 +20,9 @@ const mzpeaktsSrc = fileURLToPath(
   new URL("./vendor/mzpeakts/lib/src/index.ts", import.meta.url),
 );
 
-// NOTE: intentionally NO COOP/COEP headers, NO coi-serviceworker, NO
-// vite-plugin-singlefile. parquet-wasm 0.7.1 is single-threaded ESM and needs no
-// cross-origin isolation (STACK.md).
+// NOTE: intentionally no cross-origin-isolation response headers, no wasm
+// service-worker shim, and no single-file inlining plugin. parquet-wasm 0.7.1 is
+// single-threaded ESM and needs none of those (STACK.md).
 export default defineConfig({
   base: BASE,
   plugins: [react(), wasm(), topLevelAwait()],
