@@ -73,7 +73,13 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
   3. Clicking a pixel displays that pixel's full spectrum in a fast uPlot chart with zoom/pan, reading from the correct signal file (`spectra_data` profile / `spectra_peaks` centroid) per `MS_1000525` (DATA-03).
   4. Missing pixels (sparse acquisitions) render distinctly from genuine zero-intensity pixels using the presence mask.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+- [ ] 03-01-PLAN.md — TIC compute (buildTic) + rasterize (colormap/clip/sparse sentinel) pure foundations + 'tic' LoadStage (IMAGE-01, IMAGE-04)
+- [ ] 03-02-PLAN.md — DATA-03 representation-routed signal reads (getSpectrumArraysFor) + selectSpectrum rewire (DATA-03, SPEC-01)
+- [ ] 03-03-PLAN.md — eager 'tic' store stage + ImagingPanel canvas (hover/click/ring) + App wiring + SPEC-02 mzWindow placeholder (IMAGE-01, IMAGE-04, SPEC-01, SPEC-02)
+- [ ] 03-04-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
+
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
 
@@ -119,7 +125,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 |-------|----------------|--------|-----------|
 | 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete    | 2026-06-03 |
 | 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete    | 2026-06-03 |
-| 3. TIC Image + Pixel→Spectrum Round-Trip | 0/? | Not started | - |
+| 3. TIC Image + Pixel→Spectrum Round-Trip | 0/4 | Planned     | - |
 | 4. Ion Image + Intensity Scaling | 0/? | Not started | - |
 | 5. Worker Offload, Robustness & Static Deploy | 0/? | Not started | - |
 
