@@ -84,6 +84,7 @@ export function buildImagingGrid(
   const presenceMask = new Uint8Array(totalCells);
 
   let duplicateCount = 0;
+  let oobCount = 0;
   const n = Math.min(coords.length, spectrumIndices.length);
   if (coords.length !== spectrumIndices.length) {
     // Mismatch is a caller bug; surface it in diagnostics rather than silently truncating.
@@ -94,9 +95,16 @@ export function buildImagingGrid(
   for (let i = 0; i < n; i++) {
     const x0 = coords[i].x - coordinateBase;
     const y0 = coords[i].y - coordinateBase;
-    // Bounds-check BEFORE indexing (T-02-02-OOB): out-of-range coords are skipped
-    // and counted only as "not filled", never written.
+    // Guard: reject non-finite coords (NaN/Infinity) BEFORE bounds check.
+    // NaN comparisons are always false, so without this guard a NaN coord would
+    // pass the bounds check silently and generate a NaN Map key.
+    if (!Number.isFinite(x0) || !Number.isFinite(y0)) {
+      oobCount++;
+      continue;
+    }
+    // Bounds-check (T-02-02-OOB): out-of-range coords are skipped and counted.
     if (x0 < 0 || x0 >= width || y0 < 0 || y0 >= height) {
+      oobCount++;
       continue;
     }
     const key = y0 * width + x0; // row-major: row=y, col=x (C2: col=position_x, row=position_y)
@@ -130,6 +138,7 @@ export function buildImagingGrid(
     uniqueCoordCount: filledCount,
     duplicateCount,
     missingCount,
+    oobCount,
     extentSource,
     geometrySource: geometry?.geometrySource ?? "derived",
     discoveryDisagreement,

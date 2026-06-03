@@ -41,7 +41,7 @@ export interface ImagingGrid {
   coordinateBase: number;
   /** IMS:1000046/47, or null → 1:1 (D-12). */
   pixelSizeUm: { x: number; y: number } | null;
-  /** Sparse lookup (D-14) — Phase 3 needs this. Key = x0*width + y0 (0-based). */
+  /** Sparse lookup (D-14) — Phase 3 needs this. Key = y0*width + x0 (row-major, 0-based). */
   coordToSpectrumIndex: Map<number, number>;
   /** Length width*height (D-14) — Phase 3 needs this. 1 = filled, 0 = empty. */
   presenceMask: Uint8Array;
@@ -56,8 +56,10 @@ export interface GridDiagnostics {
   spectrumCount: number;
   uniqueCoordCount: number;
   duplicateCount: number;
-  /** totalCells − filledCount. */
+  /** totalCells − filledCount (sparse absent pixels). */
   missingCount: number;
+  /** Coords skipped because they were non-finite (NaN/Infinity) or out of declared extent. */
+  oobCount: number;
   extentSource: "declared" | "max-coord";
   geometrySource: "discovery-block" | "run-params" | "derived";
   /** C1/C4 columns-vs-discovery mismatch note, else null. */

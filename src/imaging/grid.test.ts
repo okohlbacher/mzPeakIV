@@ -65,6 +65,7 @@ describe("buildImagingGrid — dense 5×4 (Test 1)", () => {
     expect(grid.filledCount).toBe(20);
     expect(grid.totalCells).toBe(20);
     expect(grid.diagnostics.missingCount).toBe(0);
+    expect(grid.diagnostics.oobCount).toBe(0);
     expect(grid.diagnostics.extentSource).toBe("declared");
     expect(grid.diagnostics.duplicateCount).toBe(0);
     expect(grid.diagnostics.discoveryDisagreement).toBeNull();
@@ -207,6 +208,40 @@ describe("buildImagingGrid — empty coords (Test 7)", () => {
   it("returns null (non-imaging is a valid null state, D-04)", () => {
     const grid = buildImagingGrid([], [], geometry(), "promoted-columns");
     expect(grid).toBeNull();
+  });
+});
+
+// ── Test 7b: NaN / OOB coordinate guard ──────────────────────────────────────
+
+describe("buildImagingGrid — NaN and OOB coordinate guard (Test 7b)", () => {
+  it("skips NaN coords without corrupting the Map or presenceMask", () => {
+    // Two valid pixels + one NaN coordinate pair
+    const coords = [
+      { x: 1, y: 1 },
+      { x: NaN, y: 2 }, // non-finite — must be skipped, not written to Map
+      { x: 2, y: 1 },
+    ];
+    const spectrumIndices = [0, 1, 2];
+    const grid = buildImagingGrid(coords, spectrumIndices, geometry({ pixelCount: { x: 5, y: 4 } }), "promoted-columns");
+    expect(grid).not.toBeNull();
+    if (!grid) return;
+    expect(grid.filledCount).toBe(2); // only the 2 valid pixels filled
+    expect(grid.diagnostics.oobCount).toBe(1); // NaN counted as OOB
+    // Confirm Map has no NaN key
+    expect(grid.coordToSpectrumIndex.has(NaN)).toBe(false);
+  });
+
+  it("counts out-of-declared-extent coords in oobCount", () => {
+    const coords = [
+      { x: 1, y: 1 },
+      { x: 99, y: 99 }, // outside declared 5×4 extent
+    ];
+    const spectrumIndices = [0, 1];
+    const grid = buildImagingGrid(coords, spectrumIndices, geometry({ pixelCount: { x: 5, y: 4 } }), "promoted-columns");
+    expect(grid).not.toBeNull();
+    if (!grid) return;
+    expect(grid.filledCount).toBe(1);
+    expect(grid.diagnostics.oobCount).toBe(1);
   });
 });
 
