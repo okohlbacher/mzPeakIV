@@ -25,24 +25,26 @@ type RawSpectrum = {
 function fromDataArrays(spectrum: RawSpectrum, index: number): SpectrumArrays {
   const id = String(spectrum.id);
   const da = spectrum.dataArrays;
-  if (da && da[MZ_KEY] && da[INTENSITY_KEY]) {
-    const rawMz = da[MZ_KEY];
-    const rawIntensity = da[INTENSITY_KEY];
-    // Copy into the canonical dtypes (preserve f64 m/z precision).
-    const mz = Float64Array.from(rawMz);
-    const intensity = Float32Array.from(rawIntensity);
-    if (mz.length !== intensity.length) {
-      throw new Error(
-        `Spectrum ${index}: m/z (${mz.length}) and intensity ` +
-          `(${intensity.length}) length mismatch`,
-      );
-    }
-    return { index, id, mz, intensity };
+  // Explicit profile-path fail-loud guard (mirror of the centroid "no rows"
+  // throw): a profile-routed spectrum whose data-array source is null or missing
+  // the m/z / intensity arrays must throw a named error, never fall through to a
+  // silent blank spectrum. This distinguishes "spectra_data has no arrays" from
+  // a length mismatch below.
+  if (!da || !da[MZ_KEY] || !da[INTENSITY_KEY]) {
+    throw new Error(`spectra_data has no arrays for spectrum ${index}`);
   }
-  // No decodable signal arrays — fail loud rather than render silent zeros.
-  throw new Error(
-    `Spectrum ${index} has no reconstructable m/z + intensity arrays`,
-  );
+  const rawMz = da[MZ_KEY];
+  const rawIntensity = da[INTENSITY_KEY];
+  // Copy into the canonical dtypes (preserve f64 m/z precision).
+  const mz = Float64Array.from(rawMz);
+  const intensity = Float32Array.from(rawIntensity);
+  if (mz.length !== intensity.length) {
+    throw new Error(
+      `Spectrum ${index}: m/z (${mz.length}) and intensity ` +
+        `(${intensity.length}) length mismatch`,
+    );
+  }
+  return { index, id, mz, intensity };
 }
 
 /**

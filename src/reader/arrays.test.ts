@@ -251,6 +251,22 @@ describe("getSpectrumArraysFor — DATA-03 representation routing", () => {
     );
   });
 
+  it("Test 5: profile representation but null dataArrays throws a named error (no silent blank)", async () => {
+    const reader = mockReaderBothSources({ dataArrays: undefined });
+    await expect(getSpectrumArraysFor(reader, 6, "profile")).rejects.toThrow(
+      /spectra_data has no arrays/i,
+    );
+  });
+
+  it("Test 6: profile representation but dataArrays missing m/z array throws a named error", async () => {
+    const reader = mockReaderBothSources({
+      dataArrays: { "intensity array": [10, 20] },
+    });
+    await expect(getSpectrumArraysFor(reader, 8, "profile")).rejects.toThrow(
+      /spectra_data has no arrays/i,
+    );
+  });
+
   it("missing spectrum throws a distinct 'No spectrum at index' error", async () => {
     const reader = {
       async getSpectrum() {
