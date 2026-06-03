@@ -199,3 +199,16 @@ None in files created/modified by this plan.
 
 *Phase: 01-reader-foundation-open-and-inspect*
 *Completed: 2026-06-03 (pending operator approval at checkpoint)*
+
+## Operator Adjudication (Task 3 — PROC-01 gate)
+
+**Verdict:** `approved` — operator accepted the Codex round-2 `reject` with noted risks.
+
+**Risks acknowledged:**
+- LOAD-02 remote/cross-origin URL e2e not yet tested (logged for gap closure in a later phase)
+- DATA-02 ordering defect: capability gate may fire after generic reader error on Numpress files
+- Private API coupling in detectUnsupported (underscore fields)
+- computeCapabilities() returns unsupported:[] unconditionally
+- Minor: chunked layout assertion, bootstrap fallback, delta-decoder oracle
+
+Phase 1 is declared **closed** per operator approval.
