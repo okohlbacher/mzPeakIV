@@ -28,8 +28,8 @@ describe("store integration — real small.mzpeak (non-imaging fixture)", () => 
       grid: null,
       stage: "idle",
       error: null,
-      spectrumIndex: 0,
-      spectrumArrays: null,
+      selectedIndex: null,
+      selectedSpectrum: null,
     });
   });
 

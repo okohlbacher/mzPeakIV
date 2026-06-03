@@ -283,7 +283,7 @@ test.skipIf(!existsSync(PXD))(
       coords,
       spectrumIndices,
       geom,
-      strategy,
+      strategy as import("./types").CoordSourceStrategy,
     );
     expect(grid).not.toBeNull();
     if (!grid) return;
