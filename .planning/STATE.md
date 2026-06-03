@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v0.3
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-06-03T20:41:54.474Z"
-last_activity: 2026-06-03 -- Phase 3 execution started
+stopped_at: Phase 3 Codex gate (03-04) — awaiting operator adjudication of two accept-with-revisions verdicts
+last_updated: "2026-06-03T21:17:08.979Z"
+last_activity: 2026-06-03 — Phase 3 verification sweep green; Codex gate run
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
-  completed_plans: 8
-  percent: 40
+  completed_plans: 12
+  percent: 60
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 3 (TIC Image + Pixel→Spectrum Round-Trip) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 3
-Last activity: 2026-06-03 -- Phase 3 execution started
+Phase: 3 (TIC Image + Pixel→Spectrum Round-Trip) — AWAITING CODEX ADJUDICATION
+Plan: 4 of 4 (03-04 executed — PROC-01 Codex gate)
+Status: Codex round1 + round2 both accept-with-revisions; operator adjudication required before phase close
+Last activity: 2026-06-03 — Phase 3 verification sweep green; Codex gate run
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 01 P02 | 90min | 3 tasks | 9 files |
 | Phase 01 P01-03 | 60min | 2 tasks | 6 files |
+| Phase 03 P04 | 18min | - tasks | - files |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Recent decisions affecting current work:
 - Each phase bracketed by Codex adversarial review (PROC-01).
 - [Phase ?]: detectUnsupported inspects static ArrayIndexEntry.transform for Numpress CURIEs before returning the reader
 - [Phase ?]: store.error changed from bare string to StoreError { class, message, findings? } — ErrorBanner renders class-specifically (R-03b)
+- [Phase ?]: Phase-3 Codex gate: round1 (plan) + round2 (diff) both accept-with-revisions; operator adjudication pending on 8 items (mixed-source majority rule, DATA-03 representation-routing interpretation, SPEC-02 Phase-4 deferral).
+- [Phase ?]: Verification gate must run 'npm run build' (tsc -b); root 'tsc --noEmit' is a no-op (files: []) and missed 4 real type errors.
 
 ### Pending Todos
 
@@ -79,6 +82,7 @@ None yet.
 - **Phase 2 gate (DOWNGRADED 2026-06-03):** the imaging coordinate convention is now SPECIFIED by `imaging-mzpeak-spec v0.3` (ingested; see `.planning/research/IMAGING-SPEC-ALIGNMENT.md`). Phase 2 is plannable/buildable against the spec + synthetic fixtures. The converted **PXD001283** `.mzpeak` is now a *validation* input (260×134), not a precondition to start. Spec is pre-merge into base mzPeak → keep the CoordSource fallback chain.
 - **Capability scope (Phase 1):** which `chunk_encoding`/`buffer_format`/CV-term values real files use determines what the capability check must refuse vs accept — confirm against converter output (the imzML2mzPeak project) and PXD001283.
 - **Signal-file routing (DATA-03, new):** ion-image + spectrum reads must select `spectra_data` (profile) vs `spectra_peaks` (centroid) by `MS_1000525` — do not assume `spectra_data`.
+- Phase 3 close blocked on operator adjudication of two accept-with-revisions Codex verdicts (see 03-04-SUMMARY.md items 1-8) + copying both verdict lines into the phase commit footer.
 
 ## Deferred Items
 
@@ -90,6 +94,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-03T20:23:54.469Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-tic-image-pixel-spectrum-round-trip/03-UI-SPEC.md
+Last session: 2026-06-03T21:17:00.366Z
+Stopped at: Phase 3 Codex gate (03-04) — both rounds accept-with-revisions, awaiting operator adjudication
+Resume file: .planning/phases/03-tic-image-pixel-spectrum-round-trip/03-04-SUMMARY.md

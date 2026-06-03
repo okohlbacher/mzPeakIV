@@ -27,21 +27,21 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 
 ### Spatial Images (IMAGE)
 
-- [ ] **IMAGE-01**: App renders a TIC (total-ion-current) image as the default spatial overview.
+- [x] **IMAGE-01**: App renders a TIC (total-ion-current) image as the default spatial overview.
 - [ ] **IMAGE-02**: App renders an ion image for a user-entered *m/z* with a tolerance specified in either Da or ppm.
 - [ ] **IMAGE-03**: User can choose a colormap and an intensity scaling mode (linear / log) with percentile clipping, so images are not blank on high-dynamic-range data.
-- [ ] **IMAGE-04**: Hovering the image shows the pixel's (1-based) x/y and intensity readout; the image renders with the spec's **fixed mandatory orientation** — `M[row][col]`, col=x, row=y, pixel (1,1) top-left, y increasing downward, **no flip/transpose**, scan-direction terms ignored for display — and respects pixel aspect ratio from `IMS:1000046/47`.
+- [x] **IMAGE-04**: Hovering the image shows the pixel's (1-based) x/y and intensity readout; the image renders with the spec's **fixed mandatory orientation** — `M[row][col]`, col=x, row=y, pixel (1,1) top-left, y increasing downward, **no flip/transpose**, scan-direction terms ignored for display — and respects pixel aspect ratio from `IMS:1000046/47`.
 
 ### Spectrum View (SPEC)
 
-- [ ] **SPEC-01**: Clicking a pixel displays that pixel's full spectrum in a fast plot (uPlot) with zoom/pan.
-- [ ] **SPEC-02**: The currently selected *m/z* ± tolerance window is visually marked on the spectrum.
+- [x] **SPEC-01**: Clicking a pixel displays that pixel's full spectrum in a fast plot (uPlot) with zoom/pan.
+- [x] **SPEC-02**: The currently selected *m/z* ± tolerance window is visually marked on the spectrum.
 
 ### Signal Data (DATA)
 
 - [x] **DATA-01**: App correctly reads the point layout and the chunked layout with delta encoding, reconstructing m/z and intensity arrays.
 - [x] **DATA-02**: App detects unsupported encodings/storage (MS-Numpress, auxiliary arrays, directory storage) and fails loudly with a named, actionable error rather than rendering silent/incorrect data.
-- [ ] **DATA-03**: App reads each spectrum's signal (for the per-pixel spectrum view and ion-image aggregation) from the correct file per `MS_1000525_spectrum_representation` — profile → `spectra_data.parquet`, centroid → `spectra_peaks.parquet` — never assuming `spectra_data`.
+- [x] **DATA-03**: App reads each spectrum's signal (for the per-pixel spectrum view and ion-image aggregation) from the correct file per `MS_1000525_spectrum_representation` — profile → `spectra_data.parquet`, centroid → `spectra_peaks.parquet` — never assuming `spectra_data`.
 
 ### Errors & Robustness (UX)
 
@@ -77,14 +77,14 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | FMT-04 | Phase 1 | Complete |
 | DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Complete |
-| DATA-03 | Phase 3 | Pending |
+| DATA-03 | Phase 3 | Complete |
 | IMG-01 | Phase 2 | Complete |
 | IMG-02 | Phase 2 | Complete |
 | IMG-03 | Phase 2 | Complete |
-| IMAGE-01 | Phase 3 | Pending |
-| IMAGE-04 | Phase 3 | Pending |
-| SPEC-01 | Phase 3 | Pending |
-| SPEC-02 | Phase 3 | Pending |
+| IMAGE-01 | Phase 3 | Complete |
+| IMAGE-04 | Phase 3 | Complete |
+| SPEC-01 | Phase 3 | Complete |
+| SPEC-02 | Phase 3 | Complete |
 | IMAGE-02 | Phase 4 | Pending |
 | IMAGE-03 | Phase 4 | Pending |
 | UX-01 | Phase 5 | Pending |
