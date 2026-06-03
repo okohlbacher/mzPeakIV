@@ -4,6 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../reader/openUrl", () => ({
   openUrl: vi.fn(async () => ({ __fakeReader: true })),
 }));
+vi.mock("../reader/openFile", () => ({
+  openFile: vi.fn(async () => ({ __fakeReader: true })),
+}));
 vi.mock("../reader/fileMeta", () => ({
   manifest: vi.fn(() => [{ name: "x", entityType: "spectrum", dataKind: "data arrays" }]),
   fileMeta: vi.fn(() => ({
@@ -13,11 +16,20 @@ vi.mock("../reader/fileMeta", () => ({
     run: null,
     samples: [],
   })),
-  fileStats: vi.fn(() => ({
+}));
+vi.mock("../reader/stats", () => ({
+  computeStats: vi.fn(() => ({
     numSpectra: 3,
     numEntities: 1,
     mzRange: null,
-    msLevels: [],
+    msLevels: [1],
+    representationCounts: { profile: 2, centroid: 1 },
+  })),
+  computeCapabilities: vi.fn(() => ({
+    layout: "point",
+    encodings: ["MS:1000514"],
+    isImaging: false,
+    unsupported: [],
   })),
 }));
 vi.mock("../reader/arrays", () => ({
@@ -38,6 +50,7 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
       fileMeta: null,
       manifest: [],
       stats: null,
+      capabilities: null,
       stage: "idle",
       error: null,
       selectedIndex: null,
@@ -80,5 +93,28 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
     const state = useStore.getState();
     expect(state.stage).toBe("error");
     expect(state.error).toContain("boom");
+  });
+
+  it("store.openFile transitions zip-index -> manifest -> metadata -> ready", async () => {
+    const seen: string[] = [];
+    const unsub = useStore.subscribe((s) => {
+      const last = seen[seen.length - 1];
+      if (s.stage !== last) seen.push(s.stage);
+    });
+
+    const fakeFile = new File(["fake"], "demo.mzpeak", { type: "application/octet-stream" });
+    await useStore.getState().openFile(fakeFile);
+    unsub();
+
+    const staged = seen.filter((s) =>
+      ["zip-index", "manifest", "metadata", "ready"].includes(s),
+    );
+    expect(staged).toEqual(["zip-index", "manifest", "metadata", "ready"]);
+
+    const state = useStore.getState();
+    expect(state.stage).toBe("ready");
+    expect(state.stats?.numSpectra).toBe(3);
+    expect(state.capabilities?.isImaging).toBe(false);
+    expect(state.capabilities?.layout).toBe("point");
   });
 });

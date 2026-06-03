@@ -30,8 +30,8 @@ function MetaGroup({ title, value }: { title: string; value: unknown }) {
 }
 
 /**
- * Left-hand panel: the parsed manifest entity list (FMT-01) and the file-level
- * metadata groups (FMT-02).
+ * Left-hand panel: the parsed manifest entity list (FMT-01) and all five
+ * file-level metadata groups (FMT-02).
  */
 export function MetadataPanel() {
   const fileMeta = useStore((s) => s.fileMeta);
@@ -42,11 +42,7 @@ export function MetadataPanel() {
     <section
       aria-label="metadata-panel"
       style={{
-        width: 380,
-        flexShrink: 0,
         padding: "0.5rem",
-        borderRight: "1px solid #ddd",
-        overflow: "auto",
       }}
     >
       <h2>File</h2>

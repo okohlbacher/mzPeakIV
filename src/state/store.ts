@@ -1,11 +1,12 @@
 import { create } from "zustand";
 
 import { openUrl as readerOpenUrl, type Reader } from "../reader/openUrl";
+import { openFile as readerOpenFile } from "../reader/openFile";
 import {
   fileMeta as readFileMeta,
   manifest as readManifest,
-  fileStats as readFileStats,
 } from "../reader/fileMeta";
+import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArrays } from "../reader/arrays";
 import type {
   Capabilities,
@@ -17,8 +18,7 @@ import type {
 } from "../reader/types";
 
 // Small await so the staged-progress transitions are observable in the UI rather
-// than collapsing into a single synchronous frame (LOAD-03). Coarse staging here;
-// refined in plan 01-02.
+// than collapsing into a single synchronous frame (LOAD-03).
 const yieldFrame = () =>
   new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -27,8 +27,6 @@ type State = {
   fileMeta: FileMeta | null;
   manifest: ManifestEntry[];
   stats: FileStats | null;
-  // Declared in the 01-01 reader interface; populated by 01-02 (layout/encodings/
-  // imaging-detected) and 01-03 (unsupported findings). Null until then.
   capabilities: Capabilities | null;
   stage: LoadStage;
   error: string | null;
@@ -38,6 +36,7 @@ type State = {
 
 type Actions = {
   openUrl: (url: string) => Promise<void>;
+  openFile: (file: File) => Promise<void>;
   selectSpectrum: (index: number) => Promise<void>;
 };
 
@@ -53,42 +52,63 @@ const initialState: State = {
   selectedSpectrum: null,
 };
 
+/** Shared load logic — runs the staged transitions after a reader is obtained. */
+async function runLoad(
+  reader: Reader,
+  set: (partial: Partial<State & Actions>) => void,
+  get: () => State & Actions,
+) {
+  set({ stage: "manifest" });
+  await yieldFrame();
+  const manifest = readManifest(reader);
+
+  set({ stage: "metadata" });
+  await yieldFrame();
+  const fileMeta = readFileMeta(reader);
+  const stats = computeStats(reader, manifest);
+  const capabilities = computeCapabilities(reader, manifest);
+
+  set({
+    reader,
+    manifest,
+    fileMeta,
+    stats,
+    capabilities,
+    stage: "ready",
+    error: null,
+    selectedIndex: null,
+    selectedSpectrum: null,
+  });
+
+  // Auto-select the first spectrum so the happy path is one click.
+  if (stats.numSpectra > 0) {
+    await get().selectSpectrum(0);
+  }
+}
+
 export const useStore = create<State & Actions>((set, get) => ({
   ...initialState,
 
   async openUrl(url: string) {
-    // Reset to a clean load.
     set({ ...initialState, stage: "zip-index" });
     try {
       await yieldFrame();
-      // ZIP index + manifest are read eagerly inside fromUrl(); we surface the
-      // coarse stages around it so there is never a silent long pause.
       const reader = await readerOpenUrl(url);
-
-      set({ stage: "manifest" });
-      await yieldFrame();
-      const manifest = readManifest(reader);
-
-      set({ stage: "metadata" });
-      await yieldFrame();
-      const fileMeta = readFileMeta(reader);
-      const stats = readFileStats(reader);
-
+      await runLoad(reader, set, get);
+    } catch (err) {
       set({
-        reader,
-        manifest,
-        fileMeta,
-        stats,
-        stage: "ready",
-        error: null,
-        selectedIndex: null,
-        selectedSpectrum: null,
+        stage: "error",
+        error: err instanceof Error ? err.message : String(err),
       });
+    }
+  },
 
-      // Auto-select the first spectrum so the happy path is one click.
-      if (stats.numSpectra > 0) {
-        await get().selectSpectrum(0);
-      }
+  async openFile(file: File) {
+    set({ ...initialState, stage: "zip-index" });
+    try {
+      await yieldFrame();
+      const reader = await readerOpenFile(file);
+      await runLoad(reader, set, get);
     } catch (err) {
       set({
         stage: "error",

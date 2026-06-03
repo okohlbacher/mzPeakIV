@@ -25,12 +25,14 @@ export type FileMeta = {
   samples: unknown[];
 };
 
-/** Per-file aggregate stats (FMT-03; only `numSpectra`/`numEntities` in 01-01). */
+/** Per-file aggregate stats (FMT-03). */
 export type FileStats = {
   numSpectra: number;
   numEntities: number;
   mzRange: [number, number] | null;
   msLevels: number[];
+  /** Profile vs centroid breakdown (R-02b). Populated by computeStats. */
+  representationCounts: { profile: number; centroid: number };
 };
 
 /** A finding for an encoding/storage feature mzpeakts cannot decode (DATA-02). */
