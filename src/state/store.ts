@@ -5,9 +5,12 @@ import { openFile as readerOpenFile } from "../reader/openFile";
 import {
   fileMeta as readFileMeta,
   manifest as readManifest,
+  spectrumMeta,
 } from "../reader/fileMeta";
 import { computeStats, computeCapabilities } from "../reader/stats";
-import { getSpectrumArrays } from "../reader/arrays";
+// selectSpectrum routes by representation via getSpectrumArraysFor; the legacy
+// try-order getSpectrumArrays export remains available for non-imaging callers.
+import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
 import type { ImagingGrid } from "../imaging/types";
@@ -188,7 +191,14 @@ export const useStore = create<State & Actions>((set, get) => ({
     const reader = get().reader;
     if (!reader) return;
     try {
-      const selectedSpectrum = await getSpectrumArrays(reader, index);
+      // Route the read by MS:1000525 representation (DATA-03): one action serves
+      // both the numeric index input and (plan 03-03) the pixel-click.
+      const meta = spectrumMeta(reader, index);
+      const selectedSpectrum = await getSpectrumArraysFor(
+        reader,
+        index,
+        meta.representation,
+      );
       set({ selectedIndex: index, selectedSpectrum });
     } catch (err) {
       set({ stage: "error", error: classifyError(err) });
