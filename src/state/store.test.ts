@@ -1,11 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the reader boundary so the store test is deterministic and offline.
+// The fake reader exposes extractXIC because runLoad's eager 'tic' stage (D-02)
+// calls reader.extractXIC(null, null, useProfile) for imaging files. The factory
+// is inlined (not an outer const) so vi.mock hoisting does not capture TDZ vars.
 vi.mock("../reader/openUrl", () => ({
-  openUrl: vi.fn(async () => ({ __fakeReader: true })),
+  openUrl: vi.fn(async () => ({
+    __fakeReader: true,
+    extractXIC: vi.fn(async () => ({ points: [], target: { timeRange: null, mzRange: null } })),
+  })),
 }));
 vi.mock("../reader/openFile", () => ({
-  openFile: vi.fn(async () => ({ __fakeReader: true })),
+  openFile: vi.fn(async () => ({
+    __fakeReader: true,
+    extractXIC: vi.fn(async () => ({ points: [], target: { timeRange: null, mzRange: null } })),
+  })),
+}));
+// buildTic is a pure transform exercised in its own suite (03-01); here we stub
+// it so the store test stays a boundary test and does not depend on TIC math.
+vi.mock("../compute/tic", () => ({
+  buildTic: vi.fn(() => Float32Array.from([30, 30])),
 }));
 vi.mock("../reader/fileMeta", () => ({
   manifest: vi.fn(() => [{ name: "x", entityType: "spectrum", dataKind: "data arrays" }]),
@@ -104,6 +118,8 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
       stats: null,
       capabilities: null,
       grid: null,
+      tic: null,
+      mixedRepresentationWarning: null,
       stage: "idle",
       error: null,
       selectedIndex: null,
@@ -195,15 +211,16 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
     await useStore.getState().openUrl("http://example/imaging.mzpeak");
     unsub();
 
-    // The 'grid' stage is reached between metadata and ready.
+    // The 'grid' then eager 'tic' stage (D-02) are reached between metadata and ready.
     const staged = seen.filter((s) =>
-      ["zip-index", "manifest", "metadata", "grid", "ready"].includes(s),
+      ["zip-index", "manifest", "metadata", "grid", "tic", "ready"].includes(s),
     );
     expect(staged).toEqual([
       "zip-index",
       "manifest",
       "metadata",
       "grid",
+      "tic",
       "ready",
     ]);
 
@@ -215,6 +232,12 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
     expect(state.grid?.height).toBe(1);
     // filledCount === unique coord count for the dense fixture.
     expect(state.grid?.filledCount).toBe(state.grid?.diagnostics.uniqueCoordCount);
+    // Eager 'tic' stage produced a raster (stubbed buildTic) (D-02).
+    expect(state.tic).not.toBeNull();
+    // Mixed profile+centroid stats fixture (2 profile, 1 centroid) → named warning,
+    // computed from the majority/default profile source (D-08).
+    expect(state.mixedRepresentationWarning).toContain("Mixed profile/centroid");
+    expect(state.mixedRepresentationWarning).toContain("profile");
   });
 
   it("non-imaging file → grid === null, stage === 'ready', error === null (D-06)", async () => {

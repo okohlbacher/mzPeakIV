@@ -13,6 +13,7 @@ import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
+import { buildTic } from "../compute/tic";
 import type { ImagingGrid } from "../imaging/types";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { ReaderErrorClass } from "../reader/errors";
@@ -64,6 +65,10 @@ type State = {
   stats: FileStats | null;
   capabilities: Capabilities | null;
   grid: ImagingGrid | null;
+  /** TIC raster (length width*height) for the imaging grid; null when non-imaging or uncomputable (D-02). */
+  tic: Float32Array | null;
+  /** D-08 named warning: set only when a file mixes profile + centroid spectra. */
+  mixedRepresentationWarning: string | null;
   stage: LoadStage;
   error: StoreError | null;
   selectedIndex: number | null;
@@ -83,6 +88,8 @@ const initialState: State = {
   stats: null,
   capabilities: null,
   grid: null,
+  tic: null,
+  mixedRepresentationWarning: null,
   stage: "idle",
   error: null,
   selectedIndex: null,
@@ -143,6 +150,45 @@ async function runLoad(
     }
   }
 
+  // Eager 'tic' stage (D-02): compute the TIC raster the moment the grid exists,
+  // via the SAME extractXIC(null, null, useProfile) primitive Phase 4 will reuse
+  // for m/z-windowed ion images. Only runs for imaging files (grid !== null) —
+  // a non-imaging file skips TIC entirely → tic: null, no error (D-06).
+  let tic: Float32Array | null = null;
+  let mixedRepresentationWarning: string | null = null;
+  if (grid) {
+    set({ stage: "tic" });
+    await yieldFrame();
+
+    // D-08 source selection: profile is the default; only when the file is
+    // exclusively centroid (centroid > 0 && profile === 0) do we read peaks.
+    // A majority-profile mixed file still uses profile (the spec's primary).
+    const { profile, centroid } = stats.representationCounts;
+    const useProfile = !(centroid > 0 && profile === 0);
+    const mixed = profile > 0 && centroid > 0;
+    if (mixed) {
+      const usedSource = useProfile ? "profile" : "centroid";
+      const usedCount = useProfile ? profile : centroid;
+      mixedRepresentationWarning =
+        `Mixed profile/centroid spectra — TIC computed from ${usedSource} ` +
+        `(${usedCount} of ${profile + centroid}); per-pixel spectra route individually`;
+    }
+
+    try {
+      // extractXIC(null, null, useProfile) → one XICPoint per spectrum carrying
+      // its full intensity array; buildTic sums each onto its grid cell (IMAGE-01).
+      const xic = await reader.extractXIC(null, null, useProfile);
+      // A null XIC is NOT an error (D-06): it yields tic: null, which the UI
+      // renders as "Could not compute TIC for this file" — not an ErrorBanner.
+      tic = xic ? buildTic(xic, grid) : null;
+    } catch (err) {
+      // A genuine throw during TIC compute IS an error — route it loudly rather
+      // than crashing the whole load silently.
+      set({ stage: "error", error: classifyError(err) });
+      return;
+    }
+  }
+
   set({
     reader,
     manifest,
@@ -150,6 +196,8 @@ async function runLoad(
     stats,
     capabilities,
     grid,
+    tic,
+    mixedRepresentationWarning,
     stage: "ready",
     error: null,
     selectedIndex: null,

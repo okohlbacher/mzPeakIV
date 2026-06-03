@@ -7,16 +7,19 @@ import { StatsPanel } from "./StatsPanel";
 import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
+import { ImagingPanel } from "./ImagingPanel";
 
 export function App() {
   const stage = useStore((s) => s.stage);
   const error = useStore((s) => s.error);
+  const grid = useStore((s) => s.grid);
 
   const loading =
     stage === "zip-index" ||
     stage === "manifest" ||
     stage === "metadata" ||
-    stage === "grid";
+    stage === "grid" ||
+    stage === "tic";
 
   return (
     <div
@@ -45,11 +48,13 @@ export function App() {
                 ? "Loading metadata…"
                 : stage === "grid"
                   ? "Building imaging grid…"
-                  : stage === "ready"
-                    ? "Ready"
-                    : stage === "error"
-                      ? "Error"
-                      : "Idle"}
+                  : stage === "tic"
+                    ? "Building TIC image…"
+                    : stage === "ready"
+                      ? "Ready"
+                      : stage === "error"
+                        ? "Error"
+                        : "Idle"}
         </span>
       </header>
 
@@ -76,8 +81,25 @@ export function App() {
             <GridDiagnosticsPanel />
           </aside>
 
-          {/* Right spectrum panel */}
-          <SpectrumPanel />
+          {/* Right pane: imaging files stack the TIC ImagingPanel over the
+              SpectrumPanel; non-imaging files (grid === null) render the bare
+              SpectrumPanel only — no empty canvas (D-06 / UI-SPEC layout). */}
+          {grid !== null ? (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                flex: 1,
+                minWidth: 0,
+                overflow: "auto",
+              }}
+            >
+              <ImagingPanel />
+              <SpectrumPanel />
+            </div>
+          ) : (
+            <SpectrumPanel />
+          )}
         </main>
       )}
     </div>
