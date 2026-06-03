@@ -40,6 +40,42 @@ vi.mock("../reader/arrays", () => ({
     intensity: Float32Array.from([1, 2, 3]),
   })),
 }));
+vi.mock("../reader/scanCoords", () => ({
+  extractCoords: vi.fn(() => ({
+    coords: [
+      { x: 1, y: 1 },
+      { x: 2, y: 1 },
+    ],
+    spectrumIndices: [0, 1],
+    strategy: "promoted-columns",
+  })),
+  readGridGeometry: vi.fn(() => null),
+}));
+vi.mock("../imaging/grid", () => ({
+  buildImagingGrid: vi.fn(() => ({
+    width: 2,
+    height: 1,
+    coordinateBase: 1,
+    pixelSizeUm: null,
+    coordToSpectrumIndex: new Map([
+      [0, 0],
+      [1, 1],
+    ]),
+    presenceMask: Uint8Array.from([1, 1]),
+    filledCount: 2,
+    totalCells: 2,
+    coordSourceStrategy: "promoted-columns",
+    diagnostics: {
+      spectrumCount: 2,
+      uniqueCoordCount: 2,
+      duplicateCount: 0,
+      missingCount: 0,
+      extentSource: "max-coord",
+      geometrySource: "derived",
+      discoveryDisagreement: null,
+    },
+  })),
+}));
 
 import { useStore } from "./store";
 
@@ -51,6 +87,7 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
       manifest: [],
       stats: null,
       capabilities: null,
+      grid: null,
       stage: "idle",
       error: null,
       selectedIndex: null,
@@ -119,5 +156,58 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
     expect(state.stats?.numSpectra).toBe(3);
     expect(state.capabilities?.isImaging).toBe(false);
     expect(state.capabilities?.layout).toBe("point");
+  });
+
+  it("imaging file passes through the 'grid' stage and produces a non-null grid (IMG-01/02)", async () => {
+    // Override capabilities for this one load so the grid stage runs.
+    const { computeCapabilities } = await import("../reader/stats");
+    (
+      computeCapabilities as unknown as ReturnType<typeof vi.fn>
+    ).mockReturnValueOnce({
+      layout: "point",
+      encodings: ["MS:1000514"],
+      isImaging: true,
+      unsupported: [],
+    });
+
+    const seen: string[] = [];
+    const unsub = useStore.subscribe((s) => {
+      const last = seen[seen.length - 1];
+      if (s.stage !== last) seen.push(s.stage);
+    });
+
+    await useStore.getState().openUrl("http://example/imaging.mzpeak");
+    unsub();
+
+    // The 'grid' stage is reached between metadata and ready.
+    const staged = seen.filter((s) =>
+      ["zip-index", "manifest", "metadata", "grid", "ready"].includes(s),
+    );
+    expect(staged).toEqual([
+      "zip-index",
+      "manifest",
+      "metadata",
+      "grid",
+      "ready",
+    ]);
+
+    const state = useStore.getState();
+    expect(state.stage).toBe("ready");
+    expect(state.error).toBeNull();
+    expect(state.grid).not.toBeNull();
+    expect(state.grid?.width).toBe(2);
+    expect(state.grid?.height).toBe(1);
+    // filledCount === unique coord count for the dense fixture.
+    expect(state.grid?.filledCount).toBe(state.grid?.diagnostics.uniqueCoordCount);
+  });
+
+  it("non-imaging file → grid === null, stage === 'ready', error === null (D-06)", async () => {
+    // Default computeCapabilities mock returns isImaging: false → grid stage no-ops.
+    await useStore.getState().openUrl("http://example/non-imaging.mzpeak");
+
+    const state = useStore.getState();
+    expect(state.stage).toBe("ready");
+    expect(state.grid).toBeNull();
+    expect(state.error).toBeNull();
   });
 });

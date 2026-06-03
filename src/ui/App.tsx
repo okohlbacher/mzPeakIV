@@ -5,6 +5,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { MetadataPanel } from "./MetadataPanel";
 import { StatsPanel } from "./StatsPanel";
 import { CapabilitiesPanel } from "./CapabilitiesPanel";
+import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 
 export function App() {
@@ -12,7 +13,10 @@ export function App() {
   const error = useStore((s) => s.error);
 
   const loading =
-    stage === "zip-index" || stage === "manifest" || stage === "metadata";
+    stage === "zip-index" ||
+    stage === "manifest" ||
+    stage === "metadata" ||
+    stage === "grid";
 
   return (
     <div
@@ -39,11 +43,13 @@ export function App() {
               ? "Parsing manifest…"
               : stage === "metadata"
                 ? "Loading metadata…"
-                : stage === "ready"
-                  ? "Ready"
-                  : stage === "error"
-                    ? "Error"
-                    : "Idle"}
+                : stage === "grid"
+                  ? "Building imaging grid…"
+                  : stage === "ready"
+                    ? "Ready"
+                    : stage === "error"
+                      ? "Error"
+                      : "Idle"}
         </span>
       </header>
 
@@ -67,6 +73,7 @@ export function App() {
             <MetadataPanel />
             <StatsPanel />
             <CapabilitiesPanel />
+            <GridDiagnosticsPanel />
           </aside>
 
           {/* Right spectrum panel */}

@@ -1,13 +1,20 @@
 import type { LoadStage } from "../reader/types";
 
 /** Ordered stages for the progress display. */
-const STAGES: LoadStage[] = ["zip-index", "manifest", "metadata", "ready"];
+const STAGES: LoadStage[] = [
+  "zip-index",
+  "manifest",
+  "metadata",
+  "grid",
+  "ready",
+];
 
 const STAGE_LABEL: Record<LoadStage, string> = {
   idle: "Idle",
   "zip-index": "Reading ZIP index…",
   manifest: "Parsing manifest…",
   metadata: "Loading metadata…",
+  grid: "Building imaging grid…",
   ready: "Ready",
   error: "Error",
 };
@@ -22,7 +29,10 @@ interface Props {
  */
 export function ProgressBar({ stage }: Props) {
   const isLoading =
-    stage === "zip-index" || stage === "manifest" || stage === "metadata";
+    stage === "zip-index" ||
+    stage === "manifest" ||
+    stage === "metadata" ||
+    stage === "grid";
   const isError = stage === "error";
   const isIdle = stage === "idle";
 

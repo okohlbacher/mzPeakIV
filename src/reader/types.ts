@@ -78,5 +78,6 @@ export type LoadStage =
   | "zip-index"
   | "manifest"
   | "metadata"
+  | "grid"
   | "ready"
   | "error";
