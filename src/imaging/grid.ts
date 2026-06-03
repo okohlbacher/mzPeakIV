@@ -60,14 +60,17 @@ export function buildImagingGrid(
 
   // Declared extent WINS over observed max (D-11/C4); fall back to observed otherwise.
   const declared = geometry?.pixelCount ?? null;
-  const width = declared?.x ?? observedMaxX;
-  const height = declared?.y ?? observedMaxY;
+  const rawWidth = declared?.x ?? observedMaxX;
+  const rawHeight = declared?.y ?? observedMaxY;
+  // Validate dimensions: must be finite, positive, safe integers before allocation.
+  const width = Number.isSafeInteger(rawWidth) && rawWidth > 0 ? rawWidth : Math.floor(rawWidth);
+  const height = Number.isSafeInteger(rawHeight) && rawHeight > 0 ? rawHeight : Math.floor(rawHeight);
   const extentSource: GridDiagnostics["extentSource"] = declared
     ? "declared"
     : "max-coord";
 
-  // Guard against degenerate / over-large allocations.
-  if (width <= 0 || height <= 0) {
+  // Guard against degenerate / non-finite / over-large allocations.
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return null;
   }
   const totalCells = width * height;
@@ -93,8 +96,11 @@ export function buildImagingGrid(
     );
   }
   for (let i = 0; i < n; i++) {
-    const x0 = coords[i].x - coordinateBase;
-    const y0 = coords[i].y - coordinateBase;
+    // Floor to integer: MSI coords are always whole pixels, but a fractional
+    // value from a malformed file would produce a non-integer Map key and
+    // a typed-array write that doesn't correspond to a real mask cell.
+    const x0 = Math.floor(coords[i].x - coordinateBase);
+    const y0 = Math.floor(coords[i].y - coordinateBase);
     // Guard: reject non-finite coords (NaN/Infinity) BEFORE bounds check.
     // NaN comparisons are always false, so without this guard a NaN coord would
     // pass the bounds check silently and generate a NaN Map key.
@@ -134,7 +140,10 @@ export function buildImagingGrid(
   }
 
   const diagnostics: GridDiagnostics = {
-    spectrumCount: coords.length,
+    // Use `n` (the processed count) not `coords.length` — when the lengths
+    // differ due to a broken reader-boundary join, `coords.length` overstates
+    // the actually-joined pairs and hides the truncation in diagnostics.
+    spectrumCount: n,
     uniqueCoordCount: filledCount,
     duplicateCount,
     missingCount,

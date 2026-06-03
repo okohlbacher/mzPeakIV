@@ -114,6 +114,30 @@ async function runLoad(
     grid = cr
       ? buildImagingGrid(cr.coords, cr.spectrumIndices, geometry, cr.strategy)
       : null;
+    // Surface a named error when an imaging file's grid could not be built —
+    // a silent grid:null on an imaging file is a failure, not a valid state (D-06
+    // only applies to non-imaging files). The error is 'corrupt' class (best fit
+    // until a dedicated 'grid-build-failed' class is added in Phase 5).
+    if (grid === null) {
+      set({
+        reader,
+        manifest,
+        fileMeta,
+        stats,
+        capabilities,
+        grid: null,
+        stage: "error",
+        error: {
+          class: "corrupt",
+          message:
+            "Imaging file detected but spatial pixel grid could not be reconstructed. " +
+            "The coordinate columns may be empty or malformed.",
+        },
+        selectedIndex: null,
+        selectedSpectrum: null,
+      });
+      return;
+    }
   }
 
   set({

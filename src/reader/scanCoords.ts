@@ -59,7 +59,12 @@ export type GridGeometry = {
  */
 function toCoordNumber(value: unknown): number | null {
   if (value == null) return null;
-  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "bigint") {
+    // MSI pixel coords are always small (≪ 2^53), but guard against pathological
+    // files to avoid silent precision loss on unsafe integers.
+    const n = Number(value);
+    return Number.isSafeInteger(n) ? n : null;
+  }
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   return null;
 }
@@ -100,8 +105,16 @@ function fromPromotedColumns(reader: Reader): CoordResult | null {
   const yCol = scans.getChild(IMS_POS_Y_COL);
   if (!xCol || !yCol) return null;
 
-  // source_index is optional defensively; when absent we fall back to row index.
+  // source_index maps each scan row to its spectrum.index (the join key, Pattern 1).
+  // When absent (non-conformant file), fall back to row order and warn — this is
+  // plausible but WRONG for files where scan-row order diverges from spectrum order.
   const srcCol = scans.getChild("source_index");
+  if (!srcCol) {
+    console.warn(
+      "scanCoords: source_index column absent — falling back to row-index join. " +
+        "Spectrum mappings may be incorrect for non-conformant scan tables.",
+    );
+  }
 
   const coords: { x: number; y: number }[] = [];
   const spectrumIndices: number[] = [];
@@ -252,8 +265,9 @@ function fromDiscoveryBlock(reader: Reader): GridGeometry | null {
   const pixelCount = readXYPair(block["pixel_count"]);
   const pixelSizeUm = readXYPair(block["pixel_size_um"]);
   const baseRaw = toCoordNumber(block["coordinate_base"]);
-  // Only treat the block as a geometry source if it carries actual geometry.
-  if (pixelCount === null && pixelSizeUm === null) return null;
+  // Return a partial geometry even when only coordinate_base is present — the
+  // base value is authoritative (C3) and must not be silently discarded.
+  if (pixelCount === null && pixelSizeUm === null && baseRaw === null) return null;
 
   return {
     pixelCount,
