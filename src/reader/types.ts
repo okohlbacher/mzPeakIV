@@ -79,5 +79,6 @@ export type LoadStage =
   | "manifest"
   | "metadata"
   | "grid"
+  | "tic" // Phase 3 TIC compute stage (D-02)
   | "ready"
   | "error";
