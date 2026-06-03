@@ -223,8 +223,12 @@ test.skipIf(!existsSync(PXD))(
     // unmerged in this worktree. When the PXD file exists AND scanCoords is present,
     // this drives the real reader path end-to-end.
     const { openBlob } = await import("../reader/openUrl");
+    // Path held in a variable so `tsc -b` does not statically resolve the module
+    // while src/reader/scanCoords.ts (plan 02-01) is unmerged in this worktree.
+    // The body only runs when the PXD file exists (test.skipIf guards collection).
+    const scanCoordsPath = "../reader/scanCoords";
     const { extractCoords, readGridGeometry } = (await import(
-      "../reader/scanCoords"
+      /* @vite-ignore */ scanCoordsPath
     )) as {
       extractCoords: (r: unknown) => { x: number; y: number }[] | null;
       readGridGeometry: (r: unknown) => GridGeometry;
