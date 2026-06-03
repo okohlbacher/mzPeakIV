@@ -8,6 +8,9 @@ import {
 } from "../reader/fileMeta";
 import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArrays } from "../reader/arrays";
+import { extractCoords, readGridGeometry } from "../reader/scanCoords";
+import { buildImagingGrid } from "../imaging/grid";
+import type { ImagingGrid } from "../imaging/types";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { ReaderErrorClass } from "../reader/errors";
 import type {
@@ -57,6 +60,7 @@ type State = {
   manifest: ManifestEntry[];
   stats: FileStats | null;
   capabilities: Capabilities | null;
+  grid: ImagingGrid | null;
   stage: LoadStage;
   error: StoreError | null;
   selectedIndex: number | null;
@@ -75,6 +79,7 @@ const initialState: State = {
   manifest: [],
   stats: null,
   capabilities: null,
+  grid: null,
   stage: "idle",
   error: null,
   selectedIndex: null,
@@ -97,12 +102,27 @@ async function runLoad(
   const stats = computeStats(reader, manifest);
   const capabilities = computeCapabilities(reader, manifest);
 
+  // Eager 'grid' stage (D-05): reconstruct the imaging pixel grid only when this
+  // is an imaging file. A non-imaging file leaves grid: null and proceeds to
+  // ready with NO error (D-06) — non-imaging is a valid, expected outcome.
+  set({ stage: "grid" });
+  await yieldFrame();
+  let grid: ImagingGrid | null = null;
+  if (capabilities.isImaging) {
+    const cr = extractCoords(reader);
+    const geometry = readGridGeometry(reader);
+    grid = cr
+      ? buildImagingGrid(cr.coords, cr.spectrumIndices, geometry, cr.strategy)
+      : null;
+  }
+
   set({
     reader,
     manifest,
     fileMeta,
     stats,
     capabilities,
+    grid,
     stage: "ready",
     error: null,
     selectedIndex: null,
