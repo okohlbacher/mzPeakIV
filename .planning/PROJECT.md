@@ -1,4 +1,4 @@
-# mzPeakExplorer
+# mzPeakIV — mzPeak Image Viewer
 
 ## What This Is
 

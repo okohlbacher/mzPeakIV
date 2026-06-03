@@ -2,7 +2,7 @@
 
 ## Project
 
-**mzPeakExplorer**
+**mzPeakIV**
 
 A browser-based TypeScript application for exploring **mass spectrometry imaging (MSI)** data stored in the [mzPeak](https://github.com/HUPO-PSI/mzPeak) file format. A researcher opens an imaging `.mzpeak` file (locally or from a URL) and interactively explores it: reconstructs the spatial pixel grid, renders ion images for a chosen *m/z* window, inspects the spectrum behind any pixel, and reads the file's metadata. Everything runs client-side — no backend, no upload — and the app deploys as a static site (GitHub Pages).
 

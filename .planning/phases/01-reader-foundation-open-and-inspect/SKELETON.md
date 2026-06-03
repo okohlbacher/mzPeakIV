@@ -1,4 +1,4 @@
-# Walking Skeleton — mzPeakExplorer
+# Walking Skeleton — mzPeakIV
 
 **Phase:** 1
 **Generated:** 2026-06-03 (planner-emitted contract; finalized by plan 01-01 Task 4 during execution)

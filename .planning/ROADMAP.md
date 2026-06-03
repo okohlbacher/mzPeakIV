@@ -1,4 +1,4 @@
-# mzPeakExplorer — Roadmap
+# mzPeakIV — Roadmap
 
 **Granularity:** coarse (~4-5 phases)
 **Project mode:** mvp (vertical slices — each phase ships an end-to-end demonstrable capability)

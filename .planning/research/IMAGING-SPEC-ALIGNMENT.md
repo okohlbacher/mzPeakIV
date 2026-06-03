@@ -100,4 +100,4 @@
 
 ---
 
-*This document is the binding contract between the imaging mzPeak spec v0.3 and mzPeakExplorer. When the spec revises, update §1 constraints and propagate via §3.*
+*This document is the binding contract between the imaging mzPeak spec v0.3 and mzPeakIV. When the spec revises, update §1 constraints and propagate via §3.*

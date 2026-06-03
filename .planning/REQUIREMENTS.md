@@ -1,4 +1,4 @@
-# mzPeakExplorer — Requirements
+# mzPeakIV — Requirements
 
 Scope for v1 (MVP). All v1 requirements are hypotheses until shipped and validated. REQ-ID format: `CATEGORY-NN`.
 

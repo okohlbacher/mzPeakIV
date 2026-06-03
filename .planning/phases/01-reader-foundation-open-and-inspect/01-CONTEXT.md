@@ -61,15 +61,15 @@ Out of scope (later phases): pixel-grid reconstruction (P2), TIC image + pixel�
 **Downstream agents MUST read these before planning or implementing.**
 
 ### Project research (already produced — read these; they are the substitute for a phase-research pass)
-- `/Users/kohlbach/Claude/mzPeakExplorer/.planning/research/SUMMARY.md` — synthesized findings, build order, watch-outs
-- `/Users/kohlbach/Claude/mzPeakExplorer/.planning/research/STACK.md` — exact versions, vendoring of mzpeakts, WASM/Vite serving, no COOP/COEP, GitHub Pages deploy
-- `/Users/kohlbach/Claude/mzPeakExplorer/.planning/research/ARCHITECTURE.md` — 4-layer design, reader reality (eager metadata / lazy data / extractXIC), build order, worker boundary
-- `/Users/kohlbach/Claude/mzPeakExplorer/.planning/research/PITFALLS.md` — fail-loud on unsupported encodings, m/z math, delta/null-marking reconstruction, browser memory
+- `.planning/research/SUMMARY.md` — synthesized findings, build order, watch-outs
+- `.planning/research/STACK.md` — exact versions, vendoring of mzpeakts, WASM/Vite serving, no COOP/COEP, GitHub Pages deploy
+- `.planning/research/ARCHITECTURE.md` — 4-layer design, reader reality (eager metadata / lazy data / extractXIC), build order, worker boundary
+- `.planning/research/PITFALLS.md` — fail-loud on unsupported encodings, m/z math, delta/null-marking reconstruction, browser memory
 
 ### Format & reader (external)
 - https://github.com/HUPO-PSI/mzPeak — `doc/index.md`: ZIP+Parquet layout, `mzpeak_index.json`, point vs chunked, `spectrum_array_index`, metadata groups, encodings (delta MS:1003089, Numpress MS:1002312)
 - https://github.com/HUPO-PSI/mzpeakts — reader API + what is/isn't implemented; demo files (`small.mzpeak`, `small.chunked.mzpeak`, `small.numpress.mzpeak`, `has_uv.mzpeak`) usable as test fixtures
-- `/Users/kohlbach/Claude/mzPeakExplorer/CLAUDE.md` — PROC-01 convention + format reference
+- `CLAUDE.md` — PROC-01 convention + format reference
 </canonical_refs>
 
 <specifics>
