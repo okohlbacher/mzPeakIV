@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 1 of 5 (Reader Foundation + Open-and-Inspect)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-06-03 — Roadmap created (5 phases, coarse granularity, mvp mode)
+Plan: 0 of 4 complete (4 plans + SKELETON.md created)
+Status: Planned — ready to execute (awaiting operator go / `/gsd:execute-phase 1`)
+Last activity: 2026-06-03 — Phase 1 planned: 4 plans across 4 waves, walking skeleton; plan-checker PASS (0 blockers, 1 warning fixed)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -67,5 +67,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-06-03
-Stopped at: ROADMAP.md and STATE.md created; REQUIREMENTS.md traceability filled. Ready to plan Phase 1.
+Stopped at: Phase 1 planned and committed (4 PLAN.md + SKELETON.md). Plan-checker PASS. Ready to execute Phase 1 (`/gsd:execute-phase 1`).
 Resume file: None
