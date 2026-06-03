@@ -160,11 +160,12 @@ async function runLoad(
     set({ stage: "tic" });
     await yieldFrame();
 
-    // D-08 source selection: profile is the default; only when the file is
-    // exclusively centroid (centroid > 0 && profile === 0) do we read peaks.
-    // A majority-profile mixed file still uses profile (the spec's primary).
+    // D-08 source selection: majority-source rule. Use profile when profile
+    // spectra are at least as numerous as centroid (profile is the spec's
+    // primary and the tiebreaker when counts are equal). A minority of profile
+    // spectra (e.g. 1 profile + 999 centroid) correctly routes to centroid.
     const { profile, centroid } = stats.representationCounts;
-    const useProfile = !(centroid > 0 && profile === 0);
+    const useProfile = profile >= centroid;
     const mixed = profile > 0 && centroid > 0;
     if (mixed) {
       const usedSource = useProfile ? "profile" : "centroid";
