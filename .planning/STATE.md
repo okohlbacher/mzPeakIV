@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.3
 milestone_name: milestone
 status: executing
-stopped_at: "Phase 1 planned and committed (4 PLAN.md + SKELETON.md). Plan-checker PASS. Ready to execute Phase 1 (`/gsd:execute-phase 1`)."
-last_updated: "2026-06-03T15:17:26.903Z"
+stopped_at: "Completed 01-03: capability gate + named error taxonomy + DATA-01/DATA-02 tests"
+last_updated: "2026-06-03T15:52:42.013Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 1 of 5 (Reader Foundation + Open-and-Inspect)
-Plan: 2 of 4 complete (01-01 walking skeleton implemented, verified, committed)
+Plan: 3 of 4 complete (01-01 walking skeleton implemented, verified, committed)
 Status: Ready to execute
 Last activity: 2026-06-03
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P02 | 90min | 3 tasks | 9 files |
+| Phase 01 P01-03 | 60min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -65,6 +66,8 @@ Recent decisions affecting current work:
 - Vite + React + TypeScript + Canvas2D + uPlot; fully client-side, static-hosted.
 - Imaging coordinate convention is SPECIFIED (imaging-mzpeak-spec v0.3): promoted `Int64` `scan` columns `IMS_1000050/51_position_x/y` (1-based, authoritative), fixed top-left orientation, signal-file routing by `MS_1000525`, grid from `IMS:1000042/43/46/47` + `metadata.imaging`. See `.planning/research/IMAGING-SPEC-ALIGNMENT.md`.
 - Each phase bracketed by Codex adversarial review (PROC-01).
+- [Phase ?]: detectUnsupported inspects static ArrayIndexEntry.transform for Numpress CURIEs before returning the reader
+- [Phase ?]: store.error changed from bare string to StoreError { class, message, findings? } — ErrorBanner renders class-specifically (R-03b)
 
 ### Pending Todos
 
@@ -86,6 +89,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-03T15:17:26.900Z
-Stopped at: Phase 1 planned and committed (4 PLAN.md + SKELETON.md). Plan-checker PASS. Ready to execute Phase 1 (`/gsd:execute-phase 1`).
+Last session: 2026-06-03T15:52:42.011Z
+Stopped at: Completed 01-03: capability gate + named error taxonomy + DATA-01/DATA-02 tests
 Resume file: None

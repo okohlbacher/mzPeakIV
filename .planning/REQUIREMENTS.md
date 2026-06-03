@@ -39,8 +39,8 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 
 ### Signal Data (DATA)
 
-- [ ] **DATA-01**: App correctly reads the point layout and the chunked layout with delta encoding, reconstructing m/z and intensity arrays.
-- [ ] **DATA-02**: App detects unsupported encodings/storage (MS-Numpress, auxiliary arrays, directory storage) and fails loudly with a named, actionable error rather than rendering silent/incorrect data.
+- [x] **DATA-01**: App correctly reads the point layout and the chunked layout with delta encoding, reconstructing m/z and intensity arrays.
+- [x] **DATA-02**: App detects unsupported encodings/storage (MS-Numpress, auxiliary arrays, directory storage) and fails loudly with a named, actionable error rather than rendering silent/incorrect data.
 - [ ] **DATA-03**: App reads each spectrum's signal (for the per-pixel spectrum view and ion-image aggregation) from the correct file per `MS_1000525_spectrum_representation` — profile → `spectra_data.parquet`, centroid → `spectra_peaks.parquet` — never assuming `spectra_data`.
 
 ### Errors & Robustness (UX)
@@ -75,8 +75,8 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | FMT-02 | Phase 1 | Complete |
 | FMT-03 | Phase 1 | Complete |
 | FMT-04 | Phase 1 | Complete |
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
 | DATA-03 | Phase 3 | Pending |
 | IMG-01 | Phase 2 | Pending |
 | IMG-02 | Phase 2 | Pending |

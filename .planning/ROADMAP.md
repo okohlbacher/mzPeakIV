@@ -111,7 +111,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Reader Foundation + Open-and-Inspect | 2/4 | In Progress|  |
+| 1. Reader Foundation + Open-and-Inspect | 3/4 | In Progress|  |
 | 2. Imaging Grid Reconstruction (THE GATE) | 0/? | Not started | - |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 0/? | Not started | - |
 | 4. Ion Image + Intensity Scaling | 0/? | Not started | - |
