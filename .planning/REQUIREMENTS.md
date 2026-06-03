@@ -60,4 +60,22 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| _(filled by roadmapper)_ | | |
+| LOAD-01 | Phase 1 | Pending |
+| LOAD-02 | Phase 1 | Pending |
+| LOAD-03 | Phase 1 | Pending |
+| FMT-01 | Phase 1 | Pending |
+| FMT-02 | Phase 1 | Pending |
+| FMT-03 | Phase 1 | Pending |
+| FMT-04 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Pending |
+| DATA-02 | Phase 1 | Pending |
+| IMG-01 | Phase 2 | Pending |
+| IMG-02 | Phase 2 | Pending |
+| IMG-03 | Phase 2 | Pending |
+| IMAGE-01 | Phase 3 | Pending |
+| IMAGE-04 | Phase 3 | Pending |
+| SPEC-01 | Phase 3 | Pending |
+| SPEC-02 | Phase 3 | Pending |
+| IMAGE-02 | Phase 4 | Pending |
+| IMAGE-03 | Phase 4 | Pending |
+| UX-01 | Phase 5 | Pending |
