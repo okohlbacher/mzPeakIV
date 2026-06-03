@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.3
 milestone_name: milestone
-status: executing
-stopped_at: Phase 3 Codex gate (03-04) — awaiting operator adjudication of two accept-with-revisions verdicts
-last_updated: "2026-06-03T21:17:08.979Z"
-last_activity: 2026-06-03 — Phase 3 verification sweep green; Codex gate run
+status: Codex round1 + round2 both accept-with-revisions; operator adjudication required before phase close
+stopped_at: Phase 3 Codex gate (03-04) — both rounds accept-with-revisions, awaiting operator adjudication
+last_updated: "2026-06-03T21:41:52.733Z"
+last_activity: 2026-06-03
 progress:
   total_phases: 5
   completed_phases: 3
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 3 (TIC Image + Pixel→Spectrum Round-Trip) — AWAITING CODEX ADJUDICATION
-Plan: 4 of 4 (03-04 executed — PROC-01 Codex gate)
+Phase: 4
+Plan: Not started
 Status: Codex round1 + round2 both accept-with-revisions; operator adjudication required before phase close
-Last activity: 2026-06-03 — Phase 3 verification sweep green; Codex gate run
+Last activity: 2026-06-03
 
 Progress: [██████░░░░] 60%
 
@@ -36,7 +36,7 @@ Progress: [██████░░░░] 60%
 
 **Velocity:**
 
-- Total plans completed: 8
+- Total plans completed: 12
 - Average duration: —
 - Total execution time: —
 
@@ -46,6 +46,7 @@ Progress: [██████░░░░] 60%
 |-------|-------|-------|----------|
 | 01 | 4 | - | - |
 | 02 | 4 | - | - |
+| 3 | 4 | - | - |
 
 **Recent Trend:**
 
