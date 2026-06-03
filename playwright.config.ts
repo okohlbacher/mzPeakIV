@@ -6,6 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 4173;
 const BASE = "/mzPeakIV/";
 
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -21,8 +22,7 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    // Build then preview. `npm run build` is run separately in CI; here we ensure
-    // a preview server is up on PORT serving dist/ under BASE.
+    // Main app: vite preview serving dist/ under BASE.
     command: `npm run preview -- --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}${BASE}`,
     reuseExistingServer: !process.env.CI,
