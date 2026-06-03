@@ -20,7 +20,6 @@ import { openBlob, type Reader } from "./openUrl";
 import { manifest } from "./fileMeta";
 import { detectUnsupported } from "./capability";
 import { UnsupportedEncodingError, CorruptFileError } from "./errors";
-import type { ManifestEntry } from "./types";
 
 // ── Fixture paths ─────────────────────────────────────────────────────────────
 
@@ -39,13 +38,13 @@ async function openFixture(path: string): Promise<Reader> {
 // ── Helper: build a synthetic reader-like object for mock testing ─────────────
 
 function makeReader(
-  arrayIndexEntries: Array<{ transform?: string; bufferFormat?: string; arrayTypeCURIE?: string }>,
+  arrayIndexEntries: Array<{ transform?: string | null; bufferFormat?: string; arrayTypeCURIE?: string }>,
   fileIndexMeta: Record<string, unknown> = {},
   storageType?: string,
 ): Reader {
   const fakeArrayIndex = {
     entries: arrayIndexEntries.map((e) => ({
-      transform: e.transform ?? null,
+      transform: e.transform !== undefined ? e.transform : null,
       bufferFormat: e.bufferFormat ?? "point",
       arrayTypeCURIE: e.arrayTypeCURIE ?? "MS:1000514",
     })),

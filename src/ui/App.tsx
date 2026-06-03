@@ -1,6 +1,7 @@
 import { useStore } from "../state/store";
 import { FileLoader } from "./FileLoader";
 import { ProgressBar } from "./ProgressBar";
+import { ErrorBanner } from "./ErrorBanner";
 import { MetadataPanel } from "./MetadataPanel";
 import { StatsPanel } from "./StatsPanel";
 import { CapabilitiesPanel } from "./CapabilitiesPanel";
@@ -48,22 +49,7 @@ export function App() {
 
       <ProgressBar stage={stage} />
 
-      {stage === "error" && (
-        <div
-          data-testid="error-banner"
-          role="alert"
-          style={{
-            background: "#fdecea",
-            color: "#611a15",
-            border: "1px solid #f5c6cb",
-            padding: "0.75rem 1rem",
-            margin: "0.5rem",
-            fontWeight: 600,
-          }}
-        >
-          Failed to load file: {error}
-        </div>
-      )}
+      {stage === "error" && error && <ErrorBanner error={error} />}
 
       {stage === "ready" && (
         <main style={{ display: "flex", flex: 1, minHeight: 0 }}>

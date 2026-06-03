@@ -83,7 +83,7 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
     expect(state.selectedSpectrum?.mz).toBeInstanceOf(Float64Array);
   });
 
-  it("sets stage=error and an error message on failure", async () => {
+  it("sets stage=error and a structured StoreError on failure", async () => {
     const { openUrl } = await import("../reader/openUrl");
     (openUrl as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("boom"),
@@ -92,7 +92,10 @@ describe("store.openUrl staged progress (LOAD-03)", () => {
     await useStore.getState().openUrl("http://example/bad.mzpeak");
     const state = useStore.getState();
     expect(state.stage).toBe("error");
-    expect(state.error).toContain("boom");
+    // error is now a structured StoreError (class + message), not a bare string.
+    expect(state.error).not.toBeNull();
+    expect(state.error?.class).toBe("corrupt");
+    expect(state.error?.message).toContain("boom");
   });
 
   it("store.openFile transitions zip-index -> manifest -> metadata -> ready", async () => {

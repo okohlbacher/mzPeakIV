@@ -2,8 +2,10 @@
 //
 // Everything else in the app depends on the opaque `Reader` handle re-exported
 // here, never on `mzpeakts` directly. `grep -rl "from 'mzpeakts'" src/` must
-// return only this file (acceptance criterion).
+// return only this file (acceptance criterion, R-03c).
 import { MzPeakReader } from "mzpeakts";
+import { detectUnsupported } from "./capability";
+import { UnsupportedEncodingError } from "./errors";
 
 /**
  * Opaque reader handle. The concrete type is mzpeakts' `MzPeakReader`, but
@@ -14,21 +16,38 @@ import { MzPeakReader } from "mzpeakts";
 export type Reader = InstanceType<typeof MzPeakReader>;
 
 /**
+ * Run the capability gate after a reader has been opened + initialized.
+ * Eagerly triggers spectrumData() so the arrayIndex is populated for detection.
+ * Throws UnsupportedEncodingError if any unsupported encodings are found (DATA-02).
+ */
+async function capabilityGate(reader: Reader): Promise<Reader> {
+  // Eagerly load the spectrum data reader so the arrayIndex is populated.
+  // This is required for Numpress detection from static Parquet metadata.
+  await reader.spectrumData();
+  const findings = detectUnsupported(reader, []);
+  if (findings.length > 0) {
+    throw new UnsupportedEncodingError(findings);
+  }
+  return reader;
+}
+
+/**
  * Open a `.mzpeak` from a URL (HTTP range requests via zip.js). Eagerly loads
  * metadata; signal arrays are read lazily on demand. The boundary into the
- * vendored WASM reader.
+ * vendored WASM reader. Runs the capability gate before returning.
  */
 export async function openUrl(url: string | URL): Promise<Reader> {
   // boundary: mzpeakts/parquet-wasm — opening untrusted file bytes over HTTP.
-  return await MzPeakReader.fromUrl(url);
+  const reader = await MzPeakReader.fromUrl(url);
+  return capabilityGate(reader);
 }
 
 /**
  * Open a `.mzpeak` from a local File/Blob (no createObjectURL hack needed —
- * mzpeakts has a first-class `fromBlob`). Exposed now so plan 01-02's local
- * picker builds on the same boundary; unused by 01-01's URL happy path.
+ * mzpeakts has a first-class `fromBlob`). Runs the capability gate before returning.
  */
 export async function openBlob(blob: Blob): Promise<Reader> {
   // boundary: mzpeakts/parquet-wasm — opening untrusted local file bytes.
-  return await MzPeakReader.fromBlob(blob);
+  const reader = await MzPeakReader.fromBlob(blob);
+  return capabilityGate(reader);
 }

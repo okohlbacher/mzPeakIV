@@ -8,6 +8,8 @@ import {
 } from "../reader/fileMeta";
 import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArrays } from "../reader/arrays";
+import { UnsupportedEncodingError } from "../reader/errors";
+import type { ReaderErrorClass } from "../reader/errors";
 import type {
   Capabilities,
   FileMeta,
@@ -15,12 +17,39 @@ import type {
   LoadStage,
   ManifestEntry,
   SpectrumArrays,
+  UnsupportedFinding,
 } from "../reader/types";
+
+/** Structured store error (R-03b). */
+export type StoreError = {
+  class: ReaderErrorClass;
+  message: string;
+  findings?: UnsupportedFinding[];
+};
 
 // Small await so the staged-progress transitions are observable in the UI rather
 // than collapsing into a single synchronous frame (LOAD-03).
 const yieldFrame = () =>
   new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Classify a caught error into a structured StoreError (R-03b).
+ * UnsupportedEncodingError → class: 'unsupported-encoding' with findings.
+ * Anything else            → class: 'corrupt'.
+ */
+function classifyError(err: unknown): StoreError {
+  if (err instanceof UnsupportedEncodingError) {
+    return {
+      class: "unsupported-encoding",
+      message: err.message,
+      findings: err.findings,
+    };
+  }
+  return {
+    class: "corrupt",
+    message: err instanceof Error ? err.message : String(err),
+  };
+}
 
 type State = {
   reader: Reader | null;
@@ -29,7 +58,7 @@ type State = {
   stats: FileStats | null;
   capabilities: Capabilities | null;
   stage: LoadStage;
-  error: string | null;
+  error: StoreError | null;
   selectedIndex: number | null;
   selectedSpectrum: SpectrumArrays | null;
 };
@@ -96,10 +125,7 @@ export const useStore = create<State & Actions>((set, get) => ({
       const reader = await readerOpenUrl(url);
       await runLoad(reader, set, get);
     } catch (err) {
-      set({
-        stage: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      set({ stage: "error", error: classifyError(err) });
     }
   },
 
@@ -110,10 +136,7 @@ export const useStore = create<State & Actions>((set, get) => ({
       const reader = await readerOpenFile(file);
       await runLoad(reader, set, get);
     } catch (err) {
-      set({
-        stage: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      set({ stage: "error", error: classifyError(err) });
     }
   },
 
@@ -124,10 +147,7 @@ export const useStore = create<State & Actions>((set, get) => ({
       const selectedSpectrum = await getSpectrumArrays(reader, index);
       set({ selectedIndex: index, selectedSpectrum });
     } catch (err) {
-      set({
-        stage: "error",
-        error: err instanceof Error ? err.message : String(err),
-      });
+      set({ stage: "error", error: classifyError(err) });
     }
   },
 }));
