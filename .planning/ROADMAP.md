@@ -49,7 +49,11 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
   4. The reconstructed grid is validated against PXD001283 once converted (expected 260×134, no transpose, unique-coord count == spectrum count == 34,840). Until that file exists, validation uses synthetic known-grid fixtures built to the spec.
   5. A valid non-imaging (LC-MS) file is reported distinctly as "no spatial coordinates found — not imaging data," not as a broken file.
 
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 02-01-PLAN.md — reader CoordSource chain + run-geometry reader (IMG-01)
+- [ ] 02-02-PLAN.md — sparse ImagingGrid builder + diagnostics (IMG-02, IMG-03)
+- [ ] 02-03-PLAN.md — eager 'grid' LoadStage + GridDiagnosticsPanel + non-imaging notice (IMG-01/02/03 wired)
+- [ ] 02-04-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **Spec:** Build to imaging-mzpeak-spec v0.3 — see `.planning/research/IMAGING-SPEC-ALIGNMENT.md` (binding constraints C1–C8). Plannable now against the spec + synthetic fixtures; the converted PXD001283 `.mzpeak` is the **validation** input (no longer a precondition to start). Keep the CoordSource fallback chain since the spec is pre-merge into base mzPeak.
 **UI hint**: yes
@@ -112,7 +116,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete    | 2026-06-03 |
-| 2. Imaging Grid Reconstruction (THE GATE) | 0/? | Not started | - |
+| 2. Imaging Grid Reconstruction (THE GATE) | 0/4 | Planned | - |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 0/? | Not started | - |
 | 4. Ion Image + Intensity Scaling | 0/? | Not started | - |
 | 5. Worker Offload, Robustness & Static Deploy | 0/? | Not started | - |
