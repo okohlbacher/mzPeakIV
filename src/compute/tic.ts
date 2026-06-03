@@ -73,10 +73,11 @@ export function buildTic(xic: XicLike, grid: ImagingGrid): Float32Array {
     let sum = 0;
     for (let i = 0; i < arr.length; i++) {
       const v = arr[i];
-      // Coerce defensively: a numeric intensity element stays itself; any
-      // non-finite or non-number element (NaN/Infinity/string) → 0 (T-03-01).
-      const n = typeof v === "number" ? v : Number(v);
-      sum += Number.isFinite(n) ? n : 0;
+      // Strict numeric guard (T-03-01, Codex round2 #4): ONLY genuine finite
+      // `number` elements contribute. A non-number element — including a
+      // numeric-looking string like "1000" from a mis-typed file column — is
+      // treated as 0 rather than silently coerced into the TIC integrity total.
+      sum += typeof v === "number" && Number.isFinite(v) ? v : 0;
     }
     tic[key] = sum;
   }
