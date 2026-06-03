@@ -1,0 +1,31 @@
+import { defineConfig, devices } from "@playwright/test";
+
+// E2E runs against a real `vite preview` of the built site (built by webServer
+// below) so the test exercises the REAL hashed-wasm path with NO COOP/COEP — the
+// same way it ships on GitHub Pages.
+const PORT = 4173;
+const BASE = "/mzPeakIV/";
+
+export default defineConfig({
+  testDir: "./e2e",
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: 0,
+  workers: 1,
+  reporter: process.env.CI ? "list" : [["list"]],
+  use: {
+    baseURL: `http://localhost:${PORT}${BASE}`,
+    trace: "on-first-retry",
+  },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+  ],
+  webServer: {
+    // Build then preview. `npm run build` is run separately in CI; here we ensure
+    // a preview server is up on PORT serving dist/ under BASE.
+    command: `npm run preview -- --port ${PORT} --strictPort`,
+    url: `http://localhost:${PORT}${BASE}`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120000,
+  },
+});
