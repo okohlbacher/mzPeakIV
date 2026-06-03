@@ -146,3 +146,34 @@ None — both Codex rounds ran as specified. The `reject` verdict is expected pe
 - Phase-start SHA: `250e312491dd9054bca1594e05d62ee64e6b4a0a`
 
 ## Self-Check: PASSED
+
+## Round-2 Gap Closure (Pass 1 — 2026-06-03)
+
+Codex round-2 `reject` findings addressed in gap-closure commits:
+
+**Fixed (Critical):**
+- `grid.ts` key formula: `x0*width+y0` → `y0*width+x0` (row-major; old formula generated keys up to 67,473 on a 34,840-element array)
+- `grid.test.ts` PXD unlock test: wired to `CoordResult` instead of raw `{x,y}[]`
+- `GridDiagnosticsPanel`: non-imaging notice guards on `capabilities.isImaging===false`
+
+**Fixed (High):**
+- `grid.ts`: `Math.min` truncation now logs a console.warn
+- `types.ts` + `grid.ts`: `oobCount` field tracks NaN/OOB coords separately from `missingCount`
+- `grid.ts`: `Number.isFinite` guard before bounds check (NaN map key prevention)
+- `store.integration.test.ts`: real `small.mzpeak` integration test for non-imaging path
+
+## Round-2 Gap Closure (Pass 2 — still `reject`)
+
+Remaining Codex round-2 findings after pass 1:
+1. `scanCoords.ts`: `Number(bigint)` without `isSafeInteger` check
+2. `scanCoords.ts`: row-index fallback when `source_index` absent (silent wrong mapping)
+3. `scanCoords.ts`: `coordinate_base`-only discovery block silently discarded
+4. `grid.ts`: geometry dimensions not validated as finite positive integers before allocation
+5. `grid.ts`: fractional coordinates accepted (non-integer map keys/mask writes)
+6. `grid.ts`: `spectrumCount: coords.length` inaccurate when lengths differ (should use `n`)
+7. `store.ts`: imaging file with failed grid extraction reaches `ready` with `grid: null, error: null` (silent failure)
+8. [Non-actionable] Key formula plan deviation noted (plan text was wrong; fix is correct)
+9. [Non-actionable] PXD001283 real validation skipped (accepted per D-01 synthetic-fixtures decision)
+10. [Non-actionable] Untracked vendor artifact reproducibility note (worktree environment issue)
+
+Awaiting operator adjudication per PROC-01.
