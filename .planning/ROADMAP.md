@@ -8,7 +8,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 
 ## Phases
 
-- [ ] **Phase 1: Reader Foundation + Open-and-Inspect** - Open a `.mzpeak` (local/URL), read manifest + metadata, view any single spectrum; capability-detect and fail loud on unsupported encodings.
+- [x] **Phase 1: Reader Foundation + Open-and-Inspect** - Open a `.mzpeak` (local/URL), read manifest + metadata, view any single spectrum; capability-detect and fail loud on unsupported encodings. (completed 2026-06-03)
 - [ ] **Phase 2: Imaging Grid Reconstruction (THE GATE)** - Reconstruct the spatial pixel grid from per-spectrum coordinates via a swappable strategy; gated on a real operator imaging file.
 - [ ] **Phase 3: TIC Image + Pixel→Spectrum Round-Trip** - Render the default TIC spatial overview and complete the file→image→click→spectrum Core Value loop.
 - [ ] **Phase 4: Ion Image + Intensity Scaling** - Render a per-*m/z* ion image with Da/ppm tolerance, colormaps, and log/percentile scaling so images are never falsely blank.
@@ -111,7 +111,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Reader Foundation + Open-and-Inspect | 3/4 | In Progress|  |
+| 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete   | 2026-06-03 |
 | 2. Imaging Grid Reconstruction (THE GATE) | 0/? | Not started | - |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 0/? | Not started | - |
 | 4. Ion Image + Intensity Scaling | 0/? | Not started | - |
