@@ -16,6 +16,13 @@ vi.mock("../reader/fileMeta", () => ({
     run: null,
     samples: [],
   })),
+  // selectSpectrum now derives representation via spectrumMeta (DATA-03 routing).
+  spectrumMeta: vi.fn((_reader: unknown, index: number) => ({
+    index,
+    id: `id-${index}`,
+    msLevel: 1,
+    representation: "profile" as const,
+  })),
 }));
 vi.mock("../reader/stats", () => ({
   computeStats: vi.fn(() => ({
@@ -39,6 +46,15 @@ vi.mock("../reader/arrays", () => ({
     mz: Float64Array.from([100, 200, 300]),
     intensity: Float32Array.from([1, 2, 3]),
   })),
+  // Representation-routed variant the rewired selectSpectrum calls (DATA-03).
+  getSpectrumArraysFor: vi.fn(
+    async (_reader: unknown, index: number, _representation: unknown) => ({
+      index,
+      id: `id-${index}`,
+      mz: Float64Array.from([100, 200, 300]),
+      intensity: Float32Array.from([1, 2, 3]),
+    }),
+  ),
 }));
 vi.mock("../reader/scanCoords", () => ({
   extractCoords: vi.fn(() => ({
