@@ -1,7 +1,7 @@
 ---
 phase: 2
 slug: imaging-grid-reconstruction-the-gate
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-06-03
@@ -36,11 +36,10 @@ The existing panels use `rem`-based inline values. To keep this phase's panel pi
 | Token | Value | px (16px base) | Usage (binding — copied from CapabilitiesPanel/StatsPanel) |
 |-------|-------|----------------|-------------|
 | section-padding | `0.5rem` | 8px | `<section>` padding (the panel's outer padding) |
-| label-gap | `0.4rem` | ~6.4px | `<h3>` bottom margin (`margin: "0 0 0.4rem"`) — matches sibling headings exactly |
 | cell-gap | `0.75rem` | 12px | `paddingRight` on row label `<th>` (column gutter) |
 | list-indent | `1rem` | 16px | `<ul>` left padding for nested lists (disagreements / anomaly lists) |
 
-Exceptions: The `0.4rem` heading margin is non-4-grid but is an **intentional exact match** to the existing `CapabilitiesPanel`/`StatsPanel` `<h3>` styling — visual consistency with sibling panels overrides the 4-point grid here. Do not "fix" it to `0.5rem`; that would make this panel's heading misalign with the three panels above it. No other exceptions.
+No exceptions — all spacing tokens are multiples of 4px.
 
 ---
 
@@ -50,7 +49,7 @@ All values copied from existing panels so the new panel is visually indistinguis
 
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
-| Panel heading | `1rem` (16px, default `<h3>`) | 600-ish (browser default `<h3>` bold) | normal (default) | `<h3>Grid</h3>` — matches `<h3>Stats</h3>` / `<h3>Capabilities</h3>` |
+| Panel heading | `1rem` (16px, default `<h3>`) | 600-ish (browser default `<h3>` bold) | normal (default) | `<h3>Grid</h3>` — matches `<h3>Stats</h3>` / `<h3>Capabilities</h3>`; **bottom margin `0.4rem`** (`margin: "0 0 0.4rem"`) — typographic spacing, exact match to sibling `<h3>` elements in `CapabilitiesPanel`/`StatsPanel` |
 | Compact summary line | `0.8rem` (12.8px) | 400 (regular) for value text, 600 for the leading `Grid` label cell | 1.5 (default) | Always-visible compact line: `Grid: 260×134 — 34840/34840 px filled (100%)` |
 | Table label (`<th>`) | `0.8rem` | 600 (semibold) | normal | Left-aligned row labels in the expanded diagnostics table |
 | Table value (`<td>`) | `0.8rem` | 400 (regular) | normal | Diagnostic values |
