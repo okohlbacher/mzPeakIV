@@ -9,7 +9,7 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 ### Load (LOAD)
 
 - [x] **LOAD-01**: User can open a local `.mzpeak` file via a file picker and drag-and-drop.
-- [ ] **LOAD-02**: User can open a `.mzpeak` file from a URL (range-request friendly; works against the upstream-hosted demo files).
+- [x] **LOAD-02**: User can open a `.mzpeak` file from a URL (range-request friendly; works against the upstream-hosted demo files).
 - [x] **LOAD-03**: User sees staged progress/feedback while a file is being opened and parsed (no silent long pauses).
 
 ### Format & Metadata (FMT)
@@ -69,7 +69,7 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
 | LOAD-01 | Phase 1 | Complete |
-| LOAD-02 | Phase 1 | Pending |
+| LOAD-02 | Phase 1 | Complete — e2e/remote-url.spec.ts (Range-request assertion) |
 | LOAD-03 | Phase 1 | Complete |
 | FMT-01 | Phase 1 | Complete |
 | FMT-02 | Phase 1 | Complete |
