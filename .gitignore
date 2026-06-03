@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.planning/phases/**/*-CODEX-ROUND*.log
+.DS_Store
+coverage/
+playwright-report/
+test-results/
