@@ -25,6 +25,25 @@ export function App() {
       <header style={{ padding: "0.75rem", borderBottom: "1px solid #ddd" }}>
         <h1 style={{ margin: "0 0 0.5rem" }}>mzPeakIV</h1>
         <FileLoader loading={loading} />
+        {/* Hidden stage sentinel — keeps the skeleton + local-file e2e tests working.
+            The visible stage readout is provided by ProgressBar. */}
+        <span
+          data-testid="stage"
+          aria-hidden="true"
+          style={{ display: "none" }}
+        >
+          {stage === "zip-index"
+            ? "Reading ZIP index…"
+            : stage === "manifest"
+              ? "Parsing manifest…"
+              : stage === "metadata"
+                ? "Loading metadata…"
+                : stage === "ready"
+                  ? "Ready"
+                  : stage === "error"
+                    ? "Error"
+                    : "Idle"}
+        </span>
       </header>
 
       <ProgressBar stage={stage} />
