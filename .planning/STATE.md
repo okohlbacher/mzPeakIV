@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 1 of 5 (Reader Foundation + Open-and-Inspect)
-Plan: 0 of 4 complete (4 plans + SKELETON.md created)
-Status: Planned — ready to execute (awaiting operator go / `/gsd:execute-phase 1`)
-Last activity: 2026-06-03 — Ingested imaging-mzpeak-spec v0.3 + aligned viewer artifacts (PROJECT/REQUIREMENTS/ROADMAP/CLAUDE/CONTEXT); added DATA-03; Phase 2 unblocked. (Prior: Phase 1 planned — 4 plans, walking skeleton, plan-checker PASS.)
+Plan: 1 of 4 complete (01-01 walking skeleton implemented, verified, committed)
+Status: In Progress (01-01 done; 01-02/03/04 pending). Project relocated to ~/Claude/mzPeakIV and renamed mzPeakExplorer->mzPeakIV.
+Last activity: 2026-06-03 — Implemented+verified plan 01-01 (lint/build/8 vitest/e2e green); Codex round1=accept-with-revisions (folded), round2 on 01-01 slice=reject (dominated by phase-incompleteness + diff-framing; genuine 01-01 defects fixed in 9ac3e98).
 
 Progress: [░░░░░░░░░░] 0%
 
