@@ -131,15 +131,27 @@ describe("rasterizeTic — clamp non-finite/negative (Test 5)", () => {
 
 describe("rasterizeTic — orientation passthrough (Test 6)", () => {
   it("output cell k derives from input tic[k] (no transpose/reorder)", () => {
-    const grid = makeGrid(2, 2); // all present
-    // make a clear gradient; assert offset k*4 tracks tic[k]
-    const tic = new Float32Array([0, 0, 0, 100]); // only cell 3 is bright
+    const grid = makeGrid(2, 1); // 2 present cells
+    // uniform-value array so the present-only percentile equals that value:
+    // a flat bright field maps every cell to LUT top, and cell k tracks tic[k].
+    const tic = new Float32Array([100, 100]);
     const out = rasterizeTic(tic, grid);
 
     const top = viridis(1);
+    // both cells bright (norm 1.0); assert offset k*4 corresponds to tic[k]
+    expect(rgbaAt(out, 0)).toEqual([...top, 255]);
+    expect(rgbaAt(out, 1)).toEqual([...top, 255]);
+
+    // distinct-value gradient over enough cells that the percentile preserves the
+    // span: a uniform field of 100 with cell 0 set to 0. percentile99 of the
+    // present values (mostly 100) ≈ 100, so the bright cells map to LUT top and the
+    // single dim cell at index 0 maps to LUT bottom — order preserved, no reorder.
+    const grid2 = makeGrid(4, 1);
+    const tic2 = new Float32Array([0, 100, 100, 100]);
+    const out2 = rasterizeTic(tic2, grid2);
     const zero = viridis(0);
-    expect(rgbaAt(out, 3)).toEqual([...top, 255]); // bright cell stays at index 3
-    expect(rgbaAt(out, 0)).toEqual([...zero, 255]);
+    expect(rgbaAt(out2, 0)).toEqual([...zero, 255]); // dim cell stays at index 0
+    expect(rgbaAt(out2, 3)).toEqual([...top, 255]); // bright cell stays at index 3
   });
 });
 
