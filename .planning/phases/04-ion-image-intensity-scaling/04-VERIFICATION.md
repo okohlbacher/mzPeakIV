@@ -1,7 +1,7 @@
 ---
 phase: "04-ion-image-intensity-scaling"
 verified: "2026-06-03T18:20:00Z"
-status: human_needed
+status: passed
 score: 14/14 must-haves verified
 overrides_applied: 1
 overrides:
