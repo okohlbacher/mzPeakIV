@@ -100,6 +100,8 @@ const worker = new Worker(
   { type: "module" },
 );
 
+// Pending mzWindow — applied to state only when ionImage is confirmed non-null.
+let currentMzWindow: { mz: number; tolDa: number } | null = null;
 // Generation counter for stale renderResult responses (Pattern 5 / T-05-05).
 // Incremented on each renderIonImage call; Worker echoes requestId in the
 // response; mismatched IDs are silently discarded on the main thread.
@@ -159,7 +161,10 @@ export const useStore = create<State & Actions>((set) => ({
     const rid = ++currentRequestId;
     // Optimistic mzWindow update for spectrum band highlighting (SPEC-02).
     // The ion image itself arrives via 'renderResult' when the Worker is done.
-    set({ isRendering: true, mzWindow: { mz, tolDa } });
+    // Store the pending mzWindow — only apply it to state when ionImage is confirmed non-null.
+    // Setting mzWindow early causes amber band to appear when ion image comes back null.
+    currentMzWindow = { mz, tolDa };
+    set({ isRendering: true });
     worker.postMessage(
       { type: "renderIonImage", mz, tolDa, requestId: rid } satisfies WorkerRequest,
     );
@@ -237,13 +242,15 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
     }
 
     case "renderResult":
-      // Stale response guard (Pattern 5 / T-05-05): if the Worker echoes a
-      // requestId that no longer matches the latest request, discard silently.
+      // Stale response guard (Pattern 5 / T-05-05).
       if (msg.requestId !== currentRequestId) break;
       useStore.setState({
         ionImage: msg.ionImage ?? null,
         ionImageStats: msg.stats ?? null,
         isRendering: false,
+        // Only apply mzWindow when there's a real ion image — prevents the amber
+        // band from showing on the spectrum when the image came back null (Codex #7).
+        mzWindow: msg.ionImage ? currentMzWindow : null,
       });
       break;
 

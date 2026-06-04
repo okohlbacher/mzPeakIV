@@ -302,7 +302,8 @@ describe("store.renderIonImage — dispatch and requestId", () => {
 
     const state = useStore.getState();
     expect(state.isRendering).toBe(true);
-    expect(state.mzWindow).toEqual({ mz: 500, tolDa: 0.5 });
+    // mzWindow is not set optimistically — only applied when ionImage is confirmed non-null
+    expect(state.mzWindow).toBeNull();
 
     expect(mockPostMessage).toHaveBeenCalledOnce();
     const [msg] = mockPostMessage.mock.calls[0];
