@@ -20,7 +20,6 @@ const FIXTURE = path.resolve(__dirname, "../../test/data/small.mzpeak");
 describe("store integration — real small.mzpeak (non-imaging fixture)", () => {
   beforeEach(() => {
     useStore.setState({
-      reader: null,
       fileMeta: null,
       manifest: [],
       stats: null,
