@@ -12,7 +12,7 @@ import { ImagingPanel } from "./ImagingPanel";
 export function App() {
   const stage = useStore((s) => s.stage);
   const error = useStore((s) => s.error);
-  const grid = useStore((s) => s.grid);
+  const isImaging = useStore((s) => s.capabilities?.isImaging ?? false);
 
   const loading =
     stage === "zip-index" ||
@@ -108,10 +108,10 @@ export function App() {
             <GridDiagnosticsPanel />
           </aside>
 
-          {/* Right pane: imaging files stack the TIC ImagingPanel over the
-              SpectrumPanel; non-imaging files (grid === null) render the bare
-              SpectrumPanel only — no empty canvas (D-06 / UI-SPEC layout). */}
-          {grid !== null ? (
+          {/* Right pane: imaging files show ImagingPanel (even when grid is null —
+              grid is built lazily on first "Show Ion Image" click). Non-imaging
+              files render the bare SpectrumPanel only (D-06 / UI-SPEC layout). */}
+          {isImaging ? (
             <div
               style={{
                 display: "flex",

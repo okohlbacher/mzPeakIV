@@ -87,10 +87,15 @@ export type WorkerResponse =
  * - tic: Float32Array — transfer tic.buffer zero-copy (Pitfall 2 / Pattern 3)
  * - mixedRepresentationWarning: optional human-readable diagnostic string
  */
+/**
+ * Fast-path load: manifest and imaging flag are known immediately from
+ * mzpeak_index.json (606 bytes). fileMeta, stats, and grid are populated
+ * lazily — null until the first renderIonImage call triggers full reader init.
+ */
 export type LoadResult = {
   manifest: ManifestEntry[];
-  fileMeta: FileMeta;
-  stats: FileStats;
+  fileMeta: FileMeta | null;
+  stats: FileStats | null;
   capabilities: Capabilities;
   grid: ImagingGrid | null;
   tic: Float32Array | null;
@@ -106,8 +111,8 @@ export type LoadResult = {
  */
 export type NonImagingResult = {
   manifest: ManifestEntry[];
-  fileMeta: FileMeta;
-  stats: FileStats;
+  fileMeta: FileMeta | null;
+  stats: FileStats | null;
   capabilities: Capabilities;
 };
 

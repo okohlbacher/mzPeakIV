@@ -3,7 +3,12 @@
 // Everything else in the app depends on the opaque `Reader` handle re-exported
 // here, never on `mzpeakts` directly. `grep -rl "from 'mzpeakts'" src/` must
 // return only this file (acceptance criterion, R-03c).
-import { MzPeakReader } from "mzpeakts";
+//
+// Exception: mzPeakWorker.ts also imports ZipStorage from mzpeakts for the
+// fast-path load (reads only mzpeak_index.json). That import is the ONLY other
+// mzpeakts import allowed — kept in the Worker module to stay within the
+// reader/ encapsulation boundary.
+import { MzPeakReader, ZipStorage } from "mzpeakts";
 import { detectUnsupported } from "./capability";
 import { UnsupportedEncodingError } from "./errors";
 
@@ -32,9 +37,25 @@ async function capabilityGate(reader: Reader): Promise<Reader> {
 }
 
 /**
+ * Initialize a full MzPeakReader from an already-opened ZipStorage.
+ * Called lazily on the first renderIonImage / selectSpectrum — NOT during
+ * the initial file open (which uses ZipStorage.fromUrl/fromBlob directly).
+ * Runs the capability gate before returning.
+ */
+export async function openReaderFromStore(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  store: ZipStorage<any>,
+): Promise<Reader> {
+  const reader = await MzPeakReader.fromStore(store);
+  return capabilityGate(reader);
+}
+
+/**
  * Open a `.mzpeak` from a URL (HTTP range requests via zip.js). Eagerly loads
  * metadata; signal arrays are read lazily on demand. The boundary into the
  * vendored WASM reader. Runs the capability gate before returning.
+ * @deprecated Use ZipStorage.fromUrl() for the fast path + openReaderFromStore()
+ * for lazy full init. This function reads all metadata eagerly.
  */
 export async function openUrl(url: string | URL): Promise<Reader> {
   // boundary: mzpeakts/parquet-wasm — opening untrusted file bytes over HTTP.

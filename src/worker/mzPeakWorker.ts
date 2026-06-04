@@ -9,7 +9,8 @@
 //
 // DO NOT: import from ../state/store, instantiate `new Worker(...)` in this file.
 
-import { openUrl as readerOpenUrl, openBlob, type Reader } from "../reader/openUrl";
+import { ZipStorage } from "mzpeakts";
+import { openReaderFromStore, type Reader } from "../reader/openUrl";
 import {
   fileMeta as readFileMeta,
   manifest as readManifest,
@@ -19,11 +20,10 @@ import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
-import { buildTic } from "../compute/tic";
 import { buildIonImage, computeIonImageStats } from "../compute/ionImage";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
-import type { FileStats, LoadStage } from "../reader/types";
+import type { FileStats, LoadStage, ManifestEntry } from "../reader/types";
 import type { ImagingGrid } from "../imaging/types";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,13 @@ function sendTransfer(message: WorkerResponse, transfer: Transferable[]): void {
 // Module-scope Worker state (Pitfall 5 — NEVER reinitialize inside onmessage)
 // These persist across calls so renderIonImage and selectSpectrum can access
 // the live Reader handle without the main thread holding any reference to it.
+//
+// Two-phase lazy loading:
+//   Phase 1 (loadUrl/loadFile): ZipStorage only — reads mzpeak_index.json (fast)
+//   Phase 2 (first renderIonImage): full MzPeakReader init + grid (user-triggered)
 // ---------------------------------------------------------------------------
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let activeZipStorage: ZipStorage<any> | null = null;
 let activeReader: Reader | null = null;
 let activeStats: FileStats | null = null;
 let activeGrid: ImagingGrid | null = null;
@@ -103,47 +109,113 @@ function postError(err: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
-// Load pipeline — relocated from store.ts runLoad (lines 119-231)
+// Fast-path load — reads ONLY mzpeak_index.json (606 bytes)
 // ---------------------------------------------------------------------------
 
 /**
- * Run the staged load pipeline for a newly opened Reader. This is the exact
- * logic from store.ts::runLoad with these substitutions:
- *   - set({ stage: X })            →  postProgress(X)
- *   - set({ stage: 'error', ... }) →  postError(err); return
- *   - set({ stage: 'ready', ... }) →  sendTransfer({ type: 'loadResult', ... }, transferList)
- *   - non-imaging terminal state   →  send({ type: 'noImaging', ... })
- *
- * Also stores the resolved reader/stats/grid in module scope so subsequent
- * renderIonImage / selectSpectrum messages can access the live handles.
+ * Extract a ManifestEntry array from ZipStorage.fileIndex.
+ * The fileIndex is populated by ZipStorage.fromUrl/fromBlob (fast path — no
+ * Parquet data read). entityType and dataKind are enum strings, compatible
+ * with our plain-string ManifestEntry type.
  */
-async function runLoadInWorker(reader: Reader): Promise<void> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function manifestFromStore(store: ZipStorage<any>): ManifestEntry[] {
+  return store.fileIndex.files.map(
+    (f: { name: string; entityType: string; dataKind: string }) => ({
+      name: f.name,
+      entityType: f.entityType,
+      dataKind: f.dataKind,
+    }),
+  );
+}
+
+/**
+ * Fast load: opens the ZIP and reads ONLY mzpeak_index.json (~600 bytes).
+ * No Parquet data is read. Emits loadResult immediately with manifest +
+ * capabilities.isImaging; fileMeta/stats/grid/tic are all null (lazy).
+ *
+ * For imaging files: the main thread shows the controls panel and waits for
+ * the user to click "Show Ion Image" before any heavy Parquet work happens.
+ *
+ * For non-imaging files: emits noImaging immediately so the user sees the
+ * metadata/spectrum browser; the full reader is initialized lazily on the
+ * first selectSpectrum call.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runFastLoad(store: ZipStorage<any>): Promise<void> {
+  const manifest = manifestFromStore(store);
+  const isImaging = store.fileIndex.metadata?.imaging?.is_imaging === true;
+
+  // Minimal capabilities from the manifest — layout/encodings unknown until
+  // full reader init, which is deferred to the first renderIonImage call.
+  const capabilities = {
+    isImaging,
+    layout: "point" as const,  // assume point; corrected on full init
+    encodings: [] as string[],
+    unsupported: [] as { code: string; label: string }[],
+  };
+
   postProgress("manifest");
   await yieldFrame();
-  const manifest = readManifest(reader);
-
   postProgress("metadata");
   await yieldFrame();
-  const fileMeta = readFileMeta(reader);
-  const stats = computeStats(reader, manifest);
-  const capabilities = computeCapabilities(reader, manifest);
 
-  // Eager 'grid' stage (D-05): reconstruct the imaging pixel grid only when this
-  // is an imaging file. A non-imaging file leaves grid: null and routes to the
-  // noImaging message — not an error (D-06).
+  if (!isImaging) {
+    // Non-imaging: send noImaging immediately. The full reader is initialized
+    // lazily on the first selectSpectrum message.
+    send({ type: "noImaging", result: { manifest, fileMeta: null, stats: null, capabilities } });
+    return;
+  }
+
+  // Imaging: send loadResult with grid:null/tic:null — no Parquet touched yet.
+  // ImagingPanel renders with empty state; grid+XIC computed on first
+  // "Show Ion Image" click (renderIonImage message).
+  send({
+    type: "loadResult",
+    result: {
+      manifest,
+      fileMeta: null,
+      stats: null,
+      capabilities,
+      grid: null,
+      tic: null,
+      mixedRepresentationWarning: null,
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lazy full-reader init — triggered by first renderIonImage / selectSpectrum
+// ---------------------------------------------------------------------------
+
+/**
+ * Initialize the full MzPeakReader from the cached ZipStorage and build the
+ * imaging grid. This is the slow step (reads spectra_metadata.parquet).
+ * Called lazily on the first renderIonImage message.
+ *
+ * Posts a 'grid' progress tick so the UI shows a loading state.
+ * Returns false and posts an error if initialization fails.
+ */
+async function initReaderAndGrid(): Promise<boolean> {
+  if (!activeZipStorage) return false;
+
   postProgress("grid");
   await yieldFrame();
-  let grid: ImagingGrid | null = null;
-  if (capabilities.isImaging) {
+
+  try {
+    // This reads spectra_metadata.parquet fully — the slow step (~553 MB for HR2MSI).
+    const reader = await openReaderFromStore(activeZipStorage);
+    const manifestEntries = readManifest(reader);
+    const fileMeta = readFileMeta(reader);
+    const stats = computeStats(reader, manifestEntries);
+    const capabilities = computeCapabilities(reader, manifestEntries);
+
     const cr = extractCoords(reader);
     const geometry = readGridGeometry(reader);
-    grid = cr
+    const grid = cr
       ? buildImagingGrid(cr.coords, cr.spectrumIndices, geometry, cr.strategy)
       : null;
 
-    // Surface a named error when an imaging file's grid could not be built —
-    // a silent grid:null on an imaging file is a failure, not a valid state.
-    // D-06 only applies to non-imaging files.
     if (grid === null) {
       postError(
         new Error(
@@ -151,96 +223,31 @@ async function runLoadInWorker(reader: Reader): Promise<void> {
             "The coordinate columns may be empty or malformed.",
         ),
       );
-      return;
+      return false;
     }
-  }
 
-  // Non-imaging branch (D-04/D-06): a valid mzPeak file with no spatial
-  // coordinates is not an error — it routes to the 'no-imaging' LoadStage.
-  // Metadata panel, manifest, and spectrum browser remain accessible (D-05).
-  if (!capabilities.isImaging) {
-    // Store reader/stats for selectSpectrum; no grid for renderIonImage.
     activeReader = reader;
     activeStats = stats;
-    activeGrid = null;
+    activeGrid = grid;
 
+    // Send updated metadata/stats now that the full reader is ready.
     send({
-      type: "noImaging",
-      result: { manifest, fileMeta, stats, capabilities },
-    });
-
-    // Auto-select first spectrum so spectrum browser is immediately usable.
-    if (stats.numSpectra > 0) {
-      await runSelectSpectrum(0);
-    }
-    return;
-  }
-
-  // Eager 'tic' stage (D-02): compute the TIC raster the moment the grid exists.
-  // Only runs for imaging files (grid !== null). Non-imaging files skipped above.
-  let tic: Float32Array | null = null;
-  let mixedRepresentationWarning: string | null = null;
-
-  postProgress("tic");
-  await yieldFrame();
-
-  // D-08 majority-source rule: use profile when profile spectra are at least as
-  // numerous as centroid (profile is the tiebreaker). Verbatim from store.ts:186-195.
-  const { profile, centroid } = stats.representationCounts;
-  const useProfile = profile >= centroid;
-  const mixed = profile > 0 && centroid > 0;
-  if (mixed) {
-    const usedSource = useProfile ? "profile" : "centroid";
-    const usedCount = useProfile ? profile : centroid;
-    mixedRepresentationWarning =
-      `Mixed profile/centroid spectra — TIC computed from ${usedSource} ` +
-      `(${usedCount} of ${profile + centroid}); per-pixel spectra route individually`;
-  }
-
-  try {
-    // extractXIC(null, null, useProfile) → one XICPoint per spectrum carrying
-    // its full intensity array; buildTic sums each onto its grid cell (IMAGE-01).
-    const xic = await reader.extractXIC(null, null, useProfile);
-    // A null XIC is NOT an error (D-06): it yields tic: null.
-    tic = xic ? buildTic(xic, grid!) : null;
-  } catch (err) {
-    // A genuine throw during TIC compute IS an error — route it loudly.
-    postError(err);
-    return;
-  }
-
-  // Store module-scope state BEFORE postMessage so renderIonImage/selectSpectrum
-  // are ready the moment the main thread acknowledges the result.
-  activeReader = reader;
-  activeStats = stats;
-  activeGrid = grid;
-
-  const transferList: Transferable[] = [];
-  if (tic) transferList.push(tic.buffer);
-  // NOTE: presenceMask.buffer is NOT transferred — activeGrid retains a valid
-  // buffer for subsequent renderIonImage calls. The Uint8Array is small enough
-  // (~35 KB for PXD001283 260x134) that structured-clone copy cost is negligible.
-
-  sendTransfer(
-    {
       type: "loadResult",
       result: {
-        manifest,
+        manifest: manifestEntries,
         fileMeta,
         stats,
         capabilities,
-        grid: grid!,
-        tic,
-        mixedRepresentationWarning,
+        grid,
+        tic: null,
+        mixedRepresentationWarning: null,
       },
-    },
-    transferList,
-  );
-  // WARNING: tic.buffer is now detached — do not use tic after postMessage.
+    });
 
-  // Auto-select first spectrum (verbatim from store.ts lines 228-230).
-  if (stats.numSpectra > 0) {
-    await runSelectSpectrum(0);
+    return true;
+  } catch (err) {
+    postError(err);
+    return false;
   }
 }
 
@@ -277,18 +284,23 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
   try {
     switch (msg.type) {
       case "loadUrl": {
-        // Reset module-scope state before each new file load (Pitfall 5).
+        // Reset ALL module-scope state before each new file load (Pitfall 5).
+        activeZipStorage = null;
         activeReader = null;
         activeStats = null;
         activeGrid = null;
 
-        const reader = await readerOpenUrl(msg.url);
-        await runLoadInWorker(reader);
+        // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
+        // No Parquet data read here. Full reader init is deferred to first
+        // renderIonImage / selectSpectrum call.
+        activeZipStorage = await ZipStorage.fromUrl(msg.url);
+        await runFastLoad(activeZipStorage);
         break;
       }
 
       case "loadFile": {
-        // Reset module-scope state before each new file load (Pitfall 5).
+        // Reset ALL module-scope state before each new file load (Pitfall 5).
+        activeZipStorage = null;
         activeReader = null;
         activeStats = null;
         activeGrid = null;
@@ -296,59 +308,66 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // File objects cannot cross the Worker boundary (Pitfall 3 / Pattern 4).
         // The main thread transfers the ArrayBuffer; reconstruct a Blob here.
         const blob = new Blob([msg.bytes]);
-        const reader = await openBlob(blob);
-        await runLoadInWorker(reader);
+
+        // FAST PATH: BlobReader reads mzpeak_index.json only.
+        activeZipStorage = await ZipStorage.fromBlob(blob);
+        await runFastLoad(activeZipStorage);
         break;
       }
 
       case "renderIonImage": {
-        // V5 input validation guard (ASVS L1) — defense-in-depth: validate at
-        // the processing site, not only at the dispatch site (T-05-02).
-        // Replicates store.ts lines 283-285 verbatim.
+        // V5 input validation guard (ASVS L1) — defense-in-depth.
         const { mz, tolDa, requestId } = msg;
         if (!Number.isFinite(mz) || mz <= 0 || !Number.isFinite(tolDa) || tolDa <= 0) return;
-        if (mz - tolDa < 0) return; // non-physical negative mz start (T-04-05)
+        if (mz - tolDa < 0) return;
 
-        if (!activeReader || !activeGrid || !activeStats) {
-          // No file loaded yet — silently ignore.
-          return;
+        // LAZY INIT: on the first renderIonImage after a fast-path load, initialize
+        // the full reader and build the imaging grid. This reads spectra_metadata.parquet
+        // (~553 MB for HR2MSI) — intentionally deferred to the first user request.
+        if (!activeReader || !activeGrid) {
+          const ok = await initReaderAndGrid();
+          if (!ok) return;
         }
 
-        // D-08 majority rule — verbatim from store.ts:288.
+        if (!activeReader || !activeGrid || !activeStats) return;
+
+        // D-08 majority rule.
         const { profile, centroid } = activeStats.representationCounts;
         const useProfile = profile >= centroid;
 
-        // Span1D shape {start, end} — NOT [min, max] tuple (Pitfall 3 / T-04-07).
+        // Span1D shape {start, end} — NOT [min, max] tuple (T-04-07).
         const mzRange = { start: mz - tolDa, end: mz + tolDa };
         const xic = await activeReader.extractXIC(null, mzRange, useProfile);
         const ionImage = xic ? buildIonImage(xic, activeGrid) : null;
         const ionImageStats = ionImage ? computeIonImageStats(ionImage, activeGrid) : null;
 
-        // Transfer ionImage.buffer zero-copy (Pattern 3 / T-05-04).
         const transferList: Transferable[] = [];
         if (ionImage) transferList.push(ionImage.buffer);
 
         sendTransfer(
-          {
-            type: "renderResult",
-            ionImage,
-            stats: ionImageStats,
-            requestId,
-          },
+          { type: "renderResult", ionImage, stats: ionImageStats, requestId },
           transferList,
         );
-        // WARNING: ionImage is now detached — do not use after postMessage.
         break;
       }
 
       case "selectSpectrum": {
+        // For non-imaging files: lazily init the full reader on first spectrum select.
+        if (!activeReader && activeZipStorage) {
+          try {
+            const reader = await openReaderFromStore(activeZipStorage);
+            activeReader = reader;
+            activeStats = computeStats(reader, readManifest(reader));
+          } catch (err) {
+            postError(err);
+            return;
+          }
+        }
         await runSelectSpectrum(msg.index);
         break;
       }
     }
   } catch (err) {
-    // Outer catch serializes any unexpected error through the error boundary.
-    // Worker isolates WASM crashes to its thread; main thread stays alive (T-05-03).
     postError(err);
   }
 };
