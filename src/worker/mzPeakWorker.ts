@@ -471,7 +471,14 @@ async function computeIonImageFast(
 ): Promise<Float32Array | null> {
   if (!activeZipStorage || !activeGrid) return null;
 
-  const dataBlob = await activeZipStorage.spectrumData();
+  // spectrumData() returns ParquetFile not RemoteBlob; use open() for the RemoteBlob
+  const dataEntry2 = activeZipStorage.fileIndex.files.find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
+  );
+  if (!dataEntry2) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dataBlob = await activeZipStorage.open((dataEntry2 as any).name);
   if (!dataBlob) return null;
 
   const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
@@ -530,7 +537,15 @@ async function computeIonImageFast(
 async function readFastSpectrum(index: number): Promise<boolean> {
   if (!activeZipStorage) return false;
   try {
-    const dataBlob = await activeZipStorage.spectrumData();
+    // spectrumData() returns ParquetFile (wrong type for fromFile).
+    // Use open() to get the actual RemoteBlob, same approach as buildGridFast.
+    const dataEntry = activeZipStorage.fileIndex.files.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
+    );
+    if (!dataEntry) return false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dataBlob = await activeZipStorage.open((dataEntry as any).name);
     if (!dataBlob) return false;
 
     const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
