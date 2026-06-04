@@ -487,7 +487,8 @@ async function computeIonImageFast(
     for (let r = 0; r < table.numRows; r++) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = table.get(r) as any;
-      const pt = row?.point ?? row;
+      // point is a top-level struct column; row.point gives its value
+      const pt = (row as any)?.point;
       const mz = Number(pt?.mz ?? 0);
       if (mz < mzStart || mz > mzEnd) continue;
       const si = Number(pt?.spectrum_index ?? pt?.spectrumIndex ?? 0);
@@ -574,7 +575,8 @@ async function readFastSpectrum(index: number): Promise<boolean> {
     for (let r = 0; r < table.numRows; r++) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = table.get(r) as any;
-      const pt = row?.point ?? row;
+      // point is a top-level struct column; row.point gives its value
+      const pt = (row as any)?.point;
       const si = Number(pt?.spectrum_index ?? pt?.spectrumIndex ?? -1);
       if (si !== index) continue;
       const mz = Number(pt?.mz ?? 0);

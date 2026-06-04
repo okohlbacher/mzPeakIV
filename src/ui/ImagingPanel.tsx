@@ -100,9 +100,20 @@ export function ImagingPanel() {
     muted: false,
   });
 
-  // m/z range inputs (start – end). renderIonImage expects center ± tolDa so we convert.
+  // m/z range inputs. Auto-populated from stats.mzRange when available.
   const [mzStart, setMzStart] = useState<string>("");
   const [mzEnd, setMzEnd] = useState<string>("");
+  const [autoFilled, setAutoFilled] = useState(false);
+
+  // Auto-fill m/z range from dataset stats the first time they become available.
+  useEffect(() => {
+    if (autoFilled) return;
+    if (!stats?.mzRange) return;
+    const [lo, hi] = stats.mzRange;
+    if (!mzStart) setMzStart(lo.toFixed(2));
+    if (!mzEnd) setMzEnd(hi.toFixed(2));
+    setAutoFilled(true);
+  }, [stats?.mzRange, autoFilled, mzStart, mzEnd]);
   const [ionReadout, setIonReadout] = useState<{ text: string; muted: boolean }>({
     text: "",
     muted: false,
@@ -303,17 +314,21 @@ export function ImagingPanel() {
   function handleRenderIonImage() {
     const start = Number(mzStart);
     const end = Number(mzEnd);
-    if (!Number.isFinite(start) || start <= 0) return;
-    if (!Number.isFinite(end) || end <= start) return;
+    if (!Number.isFinite(start) || start < 0) return;
+    if (!Number.isFinite(end) || end <= 0 || end <= start) return;
     const mz = (start + end) / 2;
     const tolDa = (end - start) / 2;
-    if (mz - tolDa < 0) return;
+    if (tolDa <= 0) return;
     void renderIonImage(mz, tolDa);
   }
 
+  // Allow start=0 (show all m/z above 0); require end > start > -1
+  const startNum = Number(mzStart);
+  const endNum = Number(mzEnd);
   const rangeValid =
-    Number.isFinite(Number(mzStart)) && Number(mzStart) > 0 &&
-    Number.isFinite(Number(mzEnd)) && Number(mzEnd) > Number(mzStart);
+    mzStart !== "" && mzEnd !== "" &&
+    Number.isFinite(startNum) && startNum >= 0 &&
+    Number.isFinite(endNum) && endNum > startNum;
 
   // Phase 4 — colormap/scale/percentile change handler (D-02: no re-query, only recolor).
   function handleColormapSettings(
@@ -339,7 +354,7 @@ export function ImagingPanel() {
             type="number"
             step="any"
             min="0"
-            placeholder="start"
+            placeholder={stats?.mzRange ? stats.mzRange[0].toFixed(1) : "start"}
             value={mzStart}
             onChange={(e) => setMzStart(e.target.value)}
             style={{ width: "90px" }}
@@ -350,7 +365,7 @@ export function ImagingPanel() {
             type="number"
             step="any"
             min="0"
-            placeholder="end"
+            placeholder={stats?.mzRange ? stats.mzRange[1].toFixed(1) : "end"}
             value={mzEnd}
             onChange={(e) => setMzEnd(e.target.value)}
             style={{ width: "90px" }}
@@ -410,10 +425,20 @@ export function ImagingPanel() {
         </div>
       </div>
 
-      {/* TIC and ion-image sections: only shown after grid is built (first Show Ion Image) */}
-      {!grid && (
+      {/* TIC and ion-image sections: only shown after grid is built */}
+      {!grid && !stats && (
         <div style={{ color: "#888", fontSize: "0.85rem", padding: "0.5rem 0" }}>
-          Enter an m/z value and click <strong>Show Ion Image</strong> to load the imaging grid and render an ion image.
+          ⏳ Loading image overview… (reading coordinate + TIC columns)
+        </div>
+      )}
+      {!grid && stats && (
+        <div style={{ color: "#555", fontSize: "0.85rem", padding: "0.5rem 0" }}>
+          Overview ready — enter an m/z range and click <strong>Show Ion Image</strong>.
+          {stats.mzRange && (
+            <span style={{ color: "#888" }}>
+              {" "}Dataset range: {stats.mzRange[0].toFixed(1)}–{stats.mzRange[1].toFixed(1)} Da.
+            </span>
+          )}
         </div>
       )}
 
