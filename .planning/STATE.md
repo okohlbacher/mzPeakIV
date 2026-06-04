@@ -4,12 +4,12 @@ milestone: v0.3
 milestone_name: milestone
 status: executing
 stopped_at: Phase 04 UI-SPEC approved
-last_updated: "2026-06-04T01:18:22.148Z"
-last_activity: 2026-06-04
+last_updated: "2026-06-04T01:59:07.499Z"
+last_activity: 2026-06-04 -- Phase 05 execution started
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 20
+  total_plans: 25
   completed_plans: 20
   percent: 80
 ---
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Open an imaging mzPeak file in a browser → pick an *m/z* → see a correct ion image → click a pixel → see its spectrum.
-**Current focus:** Phase 04 — ion-image-intensity-scaling
+**Current focus:** Phase 05 — worker-offload-robustness-static-deploy
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
-Status: Executing Phase 04
-Last activity: 2026-06-04
+Phase: 05 (worker-offload-robustness-static-deploy) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 05
+Last activity: 2026-06-04 -- Phase 05 execution started
 
 Progress: [██████░░░░] 60%
 

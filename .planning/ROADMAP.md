@@ -125,7 +125,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 
 **Plans**: 5 plans
 
-- [ ] 05-01-PLAN.md — vite.config.ts worker.plugins fix + protocol.ts types + LoadStage 'no-imaging' (UX-01 foundation)
+- [x] 05-01-PLAN.md — vite.config.ts worker.plugins fix + protocol.ts types + LoadStage 'no-imaging' (UX-01 foundation)
 - [ ] 05-02-PLAN.md — mzPeakWorker.ts full load+render pipeline in Worker (UX-01 core)
 - [ ] 05-03-PLAN.md — store.ts Worker dispatcher + onmessage handler + isRendering state (UX-01 integration)
 - [ ] 05-04-PLAN.md — ProgressBar/App/ImagingPanel UI surfaces + deploy.yml + codex_review.sh hardening (UX-01 UX)
@@ -142,7 +142,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete    | 2026-06-03 |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 4/4 | Complete    | 2026-06-03 |
 | 4. Ion Image + Intensity Scaling | 8/8 | Complete    | 2026-06-04 |
-| 5. Worker Offload, Robustness & Static Deploy | 0/5 | Not started | - |
+| 5. Worker Offload, Robustness & Static Deploy | 1/5 | In Progress|  |
 
 ## Coverage
 
