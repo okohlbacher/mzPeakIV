@@ -12,7 +12,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 - [x] **Phase 2: Imaging Grid Reconstruction (THE GATE)** - Reconstruct the spatial pixel grid from per-spectrum coordinates via a swappable strategy; gated on a real operator imaging file. (completed 2026-06-03)
 - [x] **Phase 3: TIC Image + Pixel→Spectrum Round-Trip** - Render the default TIC spatial overview and complete the file→image→click→spectrum Core Value loop. (completed 2026-06-03)
 - [x] **Phase 4: Ion Image + Intensity Scaling** - Render a per-*m/z* ion image with Da/ppm tolerance, colormaps, and log/percentile scaling so images are never falsely blank. (completed 2026-06-04)
-- [ ] **Phase 5: Worker Offload, Robustness & Static Deploy** - Offload compute to a Web Worker, finalize the error taxonomy, fail loud on unsupported encodings/non-imaging, and ship to GitHub Pages.
+- [x] **Phase 5: Worker Offload, Robustness & Static Deploy** - Offload compute to a Web Worker, finalize the error taxonomy, fail loud on unsupported encodings/non-imaging, and ship to GitHub Pages. (completed 2026-06-04)
 
 ## Phase Details
 
@@ -129,7 +129,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 - [x] 05-02-PLAN.md — mzPeakWorker.ts full load+render pipeline in Worker (UX-01 core)
 - [x] 05-03-PLAN.md — store.ts Worker dispatcher + onmessage handler + isRendering state (UX-01 integration)
 - [x] 05-04-PLAN.md — ProgressBar/App/ImagingPanel UI surfaces + deploy.yml + codex_review.sh hardening (UX-01 UX)
-- [ ] 05-05-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
+- [x] 05-05-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
 
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
@@ -142,7 +142,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete    | 2026-06-03 |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 4/4 | Complete    | 2026-06-03 |
 | 4. Ion Image + Intensity Scaling | 8/8 | Complete    | 2026-06-04 |
-| 5. Worker Offload, Robustness & Static Deploy | 4/5 | In Progress|  |
+| 5. Worker Offload, Robustness & Static Deploy | 5/5 | Complete   | 2026-06-04 |
 
 ## Coverage
 
