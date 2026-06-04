@@ -5,18 +5,14 @@ import "uplot/dist/uPlot.min.css";
 import { useStore } from "../state/store";
 
 /**
- * Right-hand spectrum panel: a numeric spectrum-index selector wired to
- * `selectSpectrum` -> `getSpectrumArrays`, and a uPlot chart mounted imperatively
- * via `useRef` (no React wrapper) plotting m/z vs intensity. In imaging mode the
- * heading reflects the clicked pixel's 1-based coordinates.
+ * Compact spectrum panel — sits at the top of the right column.
+ * Low vertical profile (~160 px chart) so imaging canvases get most of the space.
  *
- * SPEC-02: reads `mzWindow` from the store and draws a translucent amber band
- * over [mz - tolDa, mz + tolDa] via uPlot hooks.draw. The band is absent when
- * mzWindow is null (TIC-only state) and updates on every redraw (Pitfall 5 safe).
+ * SPEC-02: draws a translucent amber band over [mz−tolDa, mz+tolDa] when
+ * mzWindow is set (hooks.draw, Pitfall 5 safe — reads ref, not state).
  */
 export function SpectrumPanel() {
   const mzWindow = useStore((s) => s.mzWindow);
-
   const stats = useStore((s) => s.stats);
   const grid = useStore((s) => s.grid);
   const selectedIndex = useStore((s) => s.selectedIndex);
@@ -25,56 +21,76 @@ export function SpectrumPanel() {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
-  // SPEC-02: ref for the mzWindow so the draw hook always reads the latest value
-  // without needing to destroy/recreate the plot (Pitfall 5 — band frozen on zoom).
   const mzWindowRef = useRef<{ mz: number; tolDa: number } | null>(null);
 
   const numSpectra = stats?.numSpectra ?? 0;
 
-  // Imaging-mode heading: when a pixel is selected on a grid, show its 1-based
-  // (x, y). Invert coordToSpectrumIndex to map selectedIndex → grid key. Falls
-  // back to the plain "Spectrum" heading for index-driven / non-imaging selection.
+  // Pixel coordinates heading for imaging mode
   let heading = "Spectrum";
   if (grid !== null && selectedIndex != null) {
-    let key: number | null = null;
     for (const [k, sIdx] of grid.coordToSpectrumIndex) {
       if (sIdx === selectedIndex) {
-        key = k;
+        const x1 = (k % grid.width) + grid.coordinateBase;
+        const y1 = Math.floor(k / grid.width) + grid.coordinateBase;
+        heading = `Pixel (${x1}, ${y1})`;
         break;
       }
     }
-    if (key != null) {
-      const x1 = (key % grid.width) + grid.coordinateBase;
-      const y1 = Math.floor(key / grid.width) + grid.coordinateBase;
-      heading = `Spectrum — pixel (${x1}, ${y1})`;
-    }
   }
 
-  // Create the uPlot instance once.
+  // Format large intensity values (e.g. 1.2e6 instead of 1200000)
+  function fmtIntensity(val: number | null | undefined): string {
+    if (val == null) return "";
+    if (Math.abs(val) >= 1e6) return (val / 1e6).toFixed(2) + "M";
+    if (Math.abs(val) >= 1e3) return (val / 1e3).toFixed(1) + "k";
+    return val.toFixed(0);
+  }
+
+  // Create uPlot once
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const opts: uPlot.Options = {
-      width: el.clientWidth || 640,
-      height: 360,
-      title: "Spectrum",
+      width: el.clientWidth || 600,
+      height: 150,
+      title: undefined, // title shown in the section heading instead
       scales: { x: { time: false } },
       series: [
-        { label: "m/z" },
         {
-          label: "intensity",
+          label: "m/z",
+          value: (_u, v) => (v == null ? "" : v.toFixed(4)),
+        },
+        {
+          label: "Intensity",
           stroke: "#1565c0",
-          width: 1,
+          fill: "rgba(21,101,192,0.08)",
+          width: 1.5,
           points: { show: false },
+          value: (_u, v) => fmtIntensity(v),
         },
       ],
-      axes: [{ label: "m/z" }, { label: "intensity" }],
-      // SPEC-02: draw a translucent amber band over [mz - tolDa, mz + tolDa].
-      // valToPos(..., "x", true) returns device-pixel coords matching ctx.
-      // ctx.save/restore prevents fillStyle from leaking into subsequent draws.
-      // The hook reads mzWindowRef.current so it always uses the latest value
-      // without destroying/recreating the plot on every mzWindow change (Pitfall 5).
+      axes: [
+        {
+          label: "m/z",
+          labelFont: "11px system-ui",
+          font: "10px system-ui",
+          labelSize: 18,
+          size: 38,
+          values: (_u, ticks) =>
+            ticks.map((t) => (t >= 1000 ? t.toFixed(1) : t.toFixed(2))),
+        },
+        {
+          label: "Intensity",
+          labelFont: "11px system-ui",
+          font: "10px system-ui",
+          labelSize: 18,
+          size: 52,
+          values: (_u, ticks) => ticks.map((t) => fmtIntensity(t)),
+        },
+      ],
+      padding: [4, 8, 0, 0],
+      cursor: { show: true },
       hooks: {
         draw: [
           (u: uPlot) => {
@@ -97,14 +113,10 @@ export function SpectrumPanel() {
 
     const onResize = () => {
       if (containerRef.current) {
-        plot.setSize({
-          width: containerRef.current.clientWidth || 640,
-          height: 360,
-        });
+        plot.setSize({ width: containerRef.current.clientWidth || 600, height: 150 });
       }
     };
     window.addEventListener("resize", onResize);
-
     return () => {
       window.removeEventListener("resize", onResize);
       plot.destroy();
@@ -112,7 +124,7 @@ export function SpectrumPanel() {
     };
   }, []);
 
-  // Feed new data whenever the selected spectrum changes.
+  // Update data when spectrum changes
   useEffect(() => {
     const plot = plotRef.current;
     if (!plot) return;
@@ -120,16 +132,13 @@ export function SpectrumPanel() {
       plot.setData([new Float64Array(0), new Float64Array(0)]);
       return;
     }
-    // uPlot expects number[]/TypedArray series aligned by x.
     plot.setData([
       selectedSpectrum.mz,
       selectedSpectrum.intensity as unknown as number[],
     ]);
   }, [selectedSpectrum]);
 
-  // SPEC-02: sync mzWindow from the store into the ref and trigger a uPlot redraw
-  // so hooks.draw fires with the updated band coordinates. The plot is not destroyed
-  // or recreated — only redraw() is called (Pitfall 5 avoided).
+  // Sync mzWindow band
   useEffect(() => {
     mzWindowRef.current = mzWindow;
     plotRef.current?.redraw();
@@ -138,33 +147,57 @@ export function SpectrumPanel() {
   return (
     <section
       aria-label="spectrum-panel"
-      style={{ flex: 1, minWidth: 0, padding: "0.5rem" }}
+      data-testid="spectrum-panel"
+      style={{
+        flexShrink: 0,
+        padding: "0.4rem 0.5rem 0.2rem",
+        borderBottom: "1px solid #ddd",
+        background: "#fafafa",
+      }}
     >
-      <h2>{heading}</h2>
-      <div style={{ marginBottom: "0.5rem" }}>
-        <label htmlFor="spectrum-index">
-          Spectrum index (0–{Math.max(numSpectra - 1, 0)}):{" "}
-        </label>
-        <input
-          id="spectrum-index"
-          data-testid="spectrum-index"
-          type="number"
-          min={0}
-          max={Math.max(numSpectra - 1, 0)}
-          value={selectedIndex ?? 0}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (Number.isFinite(v) && v >= 0 && v < numSpectra) {
-              void selectSpectrum(v);
-            }
-          }}
-        />
+      {/* Compact header row: heading + index picker + peak count */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.2rem", flexWrap: "wrap" }}>
+        <strong style={{ fontSize: "0.85rem", color: "#333" }}>{heading}</strong>
+
+        {numSpectra > 0 && (
+          <span style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.8rem" }}>
+            <label htmlFor="spectrum-index" style={{ color: "#666" }}>
+              index
+            </label>
+            <input
+              id="spectrum-index"
+              data-testid="spectrum-index"
+              type="number"
+              min={0}
+              max={Math.max(numSpectra - 1, 0)}
+              value={selectedIndex ?? 0}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v) && v >= 0 && v < numSpectra)
+                  void selectSpectrum(v);
+              }}
+              style={{ width: "60px", padding: "0.1rem 0.25rem", fontSize: "0.8rem" }}
+            />
+            <span style={{ color: "#888", fontSize: "0.75rem" }}>
+              / {numSpectra.toLocaleString()}
+            </span>
+          </span>
+        )}
+
         {selectedSpectrum && (
-          <span style={{ marginLeft: "0.75rem", color: "#555" }}>
-            id: {selectedSpectrum.id} · {selectedSpectrum.mz.length} points
+          <span style={{ color: "#555", fontSize: "0.75rem", marginLeft: "auto" }}>
+            {selectedSpectrum.mz.length.toLocaleString()} peaks · {selectedSpectrum.id}
+          </span>
+        )}
+
+        {!selectedSpectrum && numSpectra > 0 && (
+          <span style={{ color: "#aaa", fontSize: "0.75rem" }}>
+            Click a pixel or enter an index
           </span>
         )}
       </div>
+
+      {/* uPlot chart */}
       <div ref={containerRef} data-testid="spectrum-plot" />
     </section>
   );

@@ -79,12 +79,12 @@ export function App() {
             <MetadataPanel />
             <StatsPanel />
             <CapabilitiesPanel />
-            {/* GridDiagnosticsPanel omitted — no grid for non-imaging files */}
           </aside>
-          <div style={{ padding: "1.5rem", color: "#555", flex: 1, overflow: "auto" }}>
-            <p>This file contains mass spectra but no spatial imaging coordinates.</p>
-            <p>Open an imaging file to explore ion images.</p>
+          <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0 }}>
             <SpectrumPanel />
+            <div style={{ padding: "1rem", color: "#888", fontSize: "0.85rem" }}>
+              No spatial imaging coordinates — spectrum browser only.
+            </div>
           </div>
         </main>
       )}
@@ -108,25 +108,32 @@ export function App() {
             <GridDiagnosticsPanel />
           </aside>
 
-          {/* Right pane: imaging files show ImagingPanel (even when grid is null —
-              grid is built lazily on first "Show Ion Image" click). Non-imaging
-              files render the bare SpectrumPanel only (D-06 / UI-SPEC layout). */}
-          {isImaging ? (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                flex: 1,
-                minWidth: 0,
-                overflow: "auto",
-              }}
-            >
-              <ImagingPanel />
-              <SpectrumPanel />
-            </div>
-          ) : (
+          {/* Right pane: spectrum always at TOP (compact), imaging panels below */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minWidth: 0,
+              minHeight: 0,
+            }}
+          >
+            {/* Compact spectrum panel — low vertical profile, always visible */}
             <SpectrumPanel />
-          )}
+
+            {/* Imaging canvases fill remaining space */}
+            {isImaging ? (
+              <div style={{ flex: 1, overflow: "auto" }}>
+                <ImagingPanel />
+              </div>
+            ) : (
+              /* Non-imaging: extra padding/info where imaging panel would be */
+              <div style={{ flex: 1, padding: "1rem", color: "#888", fontSize: "0.85rem" }}>
+                This file contains mass spectra but no spatial imaging coordinates.
+                <br />Open an imaging file to explore ion images.
+              </div>
+            )}
+          </div>
         </main>
       )}
     </div>

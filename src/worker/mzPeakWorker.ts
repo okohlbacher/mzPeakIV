@@ -445,6 +445,105 @@ async function initReaderAndGrid(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Fast spectrum read — row-group skipping in spectra_data.parquet
+// ---------------------------------------------------------------------------
+
+/**
+ * Read one spectrum directly from spectra_data.parquet using Parquet
+ * row-group min/max statistics to skip irrelevant row groups.
+ *
+ * spectra_data.parquet has 39 row groups, each covering ~900 spectra with
+ * spectrum_index min/max statistics. To read spectrum N:
+ *   1. Read Parquet footer (~few KB range request) — get row group stats
+ *   2. Find the row group where min ≤ N ≤ max  — O(39) linear search
+ *   3. Read only that row group  (~12 MB) — 39× less than full file read
+ *   4. Filter rows for spectrum_index == N, extract mz + intensity
+ *
+ * This is used when activeReader is null (before the full 553 MB metadata
+ * read has been triggered) so pixel clicks are responsive from the start.
+ */
+async function readFastSpectrum(index: number): Promise<boolean> {
+  if (!activeZipStorage) return false;
+  try {
+    const dataBlob = await activeZipStorage.spectrumData();
+    if (!dataBlob) return false;
+
+    const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+    const meta = pf.metadata();
+    const nRG = meta.numRowGroups();
+
+    // Find row group containing this spectrum_index via min/max statistics.
+    // statistics() returns `any` from parquet-wasm — access properties safely.
+    let targetRG = -1;
+    for (let rg = 0; rg < nRG; rg++) {
+      const rgMeta = meta.rowGroup(rg);
+      for (let col = 0; col < rgMeta.numColumns(); col++) {
+        const colMeta = rgMeta.column(col);
+        if (!colMeta.columnPath().join(".").includes("spectrum_index")) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stats = colMeta.statistics() as any;
+        if (!stats) {
+          // No stats — fall back to linear scan: assume ~893 spectra per row group
+          targetRG = Math.min(Math.floor(index / 900), nRG - 1);
+          break;
+        }
+        const minVal = Number(stats.minValue ?? stats.min_value ?? -Infinity);
+        const maxVal = Number(stats.maxValue ?? stats.max_value ?? Infinity);
+        if (index >= minVal && index <= maxVal) targetRG = rg;
+        break;
+      }
+      if (targetRG >= 0) break;
+    }
+
+    if (targetRG < 0) {
+      // Final fallback: try the last row group
+      targetRG = nRG - 1;
+    }
+
+    // Read only the target row group — ~12 MB instead of full file.
+    const rawTable = await pf.read({ rowGroups: [targetRG] });
+    const table = tableFromIPC(rawTable.intoIPCStream());
+
+    // Extract (spectrum_index, mz, intensity) triples via row iteration.
+    const mzValues: number[] = [];
+    const intensityValues: number[] = [];
+
+    for (let r = 0; r < table.numRows; r++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row = table.get(r) as any;
+      const pt = row?.point ?? row;
+      const si = Number(pt?.spectrum_index ?? pt?.spectrumIndex ?? -1);
+      if (si !== index) continue;
+      const mz = Number(pt?.mz ?? 0);
+      const intensity = Number(pt?.intensity ?? 0);
+      mzValues.push(mz);
+      intensityValues.push(intensity);
+    }
+
+    if (mzValues.length === 0) return false;
+
+    const mzArr = new Float64Array(mzValues);
+    const intArr = new Float32Array(intensityValues);
+
+    const spectrum = {
+      index,
+      id: `scan=${index + 1}`,
+      mz: mzArr,
+      intensity: intArr,
+    };
+
+    sendTransfer(
+      { type: "spectrumResult", spectrum },
+      [mzArr.buffer, intArr.buffer],
+    );
+    return true;
+  } catch (e) {
+    console.warn("[mzPeakWorker] readFastSpectrum failed:", e);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // selectSpectrum helper — shared by both load path and explicit selectSpectrum msg
 // ---------------------------------------------------------------------------
 
@@ -545,15 +644,22 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
 
       case "selectSpectrum": {
-        // For non-imaging files: lazily init the full reader on first spectrum select.
-        if (!activeReader && activeZipStorage) {
-          try {
-            const reader = await openReaderFromStore(activeZipStorage);
-            activeReader = reader;
-            activeStats = computeStats(reader, readManifest(reader));
-          } catch (err) {
-            postError(err);
-            return;
+        if (!activeReader) {
+          // Fast path: read from spectra_data.parquet using row-group skipping.
+          // ~12 MB per spectrum vs 553 MB for full reader init. Works immediately
+          // after the fast overview builds the grid.
+          const ok = await readFastSpectrum(msg.index);
+          if (ok) break; // spectrum sent — skip full reader init for now
+          // Fast path failed — fall through to full reader init (slow but reliable)
+          if (activeZipStorage) {
+            try {
+              const reader = await openReaderFromStore(activeZipStorage);
+              activeReader = reader;
+              activeStats = computeStats(reader, readManifest(reader));
+            } catch (err) {
+              postError(err);
+              return;
+            }
           }
         }
         await runSelectSpectrum(msg.index);
