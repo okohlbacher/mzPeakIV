@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { useStore } from "../state/store";
 import { rasterizeTic, rasterizeImage, type Colormap } from "./rasterize";
-import { ppmToDa } from "../compute/ionImage";
 import type { ImagingGrid } from "../imaging/types";
 
 // Warning amber (caution, NOT error) — reused from GridDiagnosticsPanel's WARNING
@@ -94,10 +93,9 @@ export function ImagingPanel() {
     muted: false,
   });
 
-  // Phase 4 local state: m/z controls + ion canvas readout.
-  const [mzInput, setMzInput] = useState<string>("");
-  const [tolInput, setTolInput] = useState<string>("0.01");
-  const [tolUnit, setTolUnit] = useState<"Da" | "ppm">("Da");
+  // m/z range inputs (start – end). renderIonImage expects center ± tolDa so we convert.
+  const [mzStart, setMzStart] = useState<string>("");
+  const [mzEnd, setMzEnd] = useState<string>("");
   const [ionReadout, setIonReadout] = useState<{ text: string; muted: boolean }>({
     text: "",
     muted: false,
@@ -278,17 +276,21 @@ export function ImagingPanel() {
     });
   }
 
-  // Phase 4 — "Show Ion Image" button handler (IMAGE-02, D-01).
-  // V5 ASVS L1 defense-in-depth: validates independently of the store action (T-04-10).
+  // m/z range → center + half-window for renderIonImage
   function handleRenderIonImage() {
-    const mz = Number(mzInput);
-    let tolDa = Number(tolInput);
-    if (!Number.isFinite(mz) || mz <= 0) return;
-    if (!Number.isFinite(tolDa) || tolDa <= 0) return;
-    if (tolUnit === "ppm") tolDa = ppmToDa(mz, tolDa);
+    const start = Number(mzStart);
+    const end = Number(mzEnd);
+    if (!Number.isFinite(start) || start <= 0) return;
+    if (!Number.isFinite(end) || end <= start) return;
+    const mz = (start + end) / 2;
+    const tolDa = (end - start) / 2;
     if (mz - tolDa < 0) return;
     void renderIonImage(mz, tolDa);
   }
+
+  const rangeValid =
+    Number.isFinite(Number(mzStart)) && Number(mzStart) > 0 &&
+    Number.isFinite(Number(mzEnd)) && Number(mzEnd) > Number(mzStart);
 
   // Phase 4 — colormap/scale/percentile change handler (D-02: no re-query, only recolor).
   function handleColormapSettings(
@@ -305,85 +307,84 @@ export function ImagingPanel() {
       data-testid="imaging-panel"
       style={{ flexShrink: 0, padding: "0.5rem" }}
     >
-      {/* Phase 4 controls row — D-07: single compact row above TIC canvas */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-          alignItems: "center",
-          marginBottom: "0.5rem",
-        }}
-      >
-        <label>m/z</label>
-        <input
-          type="number"
-          step="any"
-          min="0"
-          value={mzInput}
-          onChange={(e) => setMzInput(e.target.value)}
-          style={{ width: "90px" }}
-        />
-        <span>&#177;</span>
-        <input
-          type="number"
-          step="any"
-          min="0"
-          value={tolInput}
-          onChange={(e) => setTolInput(e.target.value)}
-          style={{ width: "70px" }}
-        />
-        <select
-          value={tolUnit}
-          onChange={(e) => setTolUnit(e.target.value as "Da" | "ppm")}
-        >
-          <option value="Da">Da</option>
-          <option value="ppm">ppm</option>
-        </select>
-        <button
-          onClick={handleRenderIonImage}
-          disabled={isRendering || !(Number.isFinite(Number(mzInput)) && Number(mzInput) > 0 && Number.isFinite(Number(tolInput)) && Number(tolInput) > 0)}
-          style={{
-            background: "#1565c0",
-            color: "#fff",
-            border: "none",
-            padding: "0.25rem 0.5rem",
-            cursor: isRendering ? "wait" : "pointer",
-            opacity: isRendering ? 0.7 : 1,
-          }}
-        >
-          {isRendering ? "Computing…" : "Show Ion Image"}
-        </button>
-        <select
-          value={colormap}
-          onChange={(e) =>
-            handleColormapSettings(e.target.value as Colormap)
-          }
-        >
-          <option value="viridis">viridis</option>
-          <option value="inferno">inferno</option>
-          <option value="gray">gray</option>
-        </select>
-        <select
-          value={scale}
-          onChange={(e) =>
-            handleColormapSettings(colormap, e.target.value as "linear" | "log")
-          }
-        >
-          <option value="linear">linear</option>
-          <option value="log">log</option>
-        </select>
-        <select
-          value={String(percentile)}
-          onChange={(e) =>
-            handleColormapSettings(colormap, scale, Number(e.target.value))
-          }
-        >
-          <option value="0.9">90th</option>
-          <option value="0.95">95th</option>
-          <option value="0.99">99th</option>
-          <option value="0.999">99.9th</option>
-        </select>
+      {/* Controls: m/z range → Show Ion Image → colormap/scale/percentile */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.5rem" }}>
+        {/* Row 1: m/z range input */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+          <label style={{ fontWeight: 600, minWidth: "5rem" }}>m/z range</label>
+          <input
+            type="number"
+            step="any"
+            min="0"
+            placeholder="start"
+            value={mzStart}
+            onChange={(e) => setMzStart(e.target.value)}
+            style={{ width: "90px" }}
+            aria-label="m/z start"
+          />
+          <span style={{ color: "#666" }}>–</span>
+          <input
+            type="number"
+            step="any"
+            min="0"
+            placeholder="end"
+            value={mzEnd}
+            onChange={(e) => setMzEnd(e.target.value)}
+            style={{ width: "90px" }}
+            aria-label="m/z end"
+          />
+          <span style={{ color: "#888", fontSize: "0.75rem" }}>Da</span>
+          <button
+            onClick={handleRenderIonImage}
+            disabled={isRendering || !rangeValid}
+            style={{
+              background: rangeValid && !isRendering ? "#1565c0" : "#ccc",
+              color: rangeValid && !isRendering ? "#fff" : "#666",
+              border: "none",
+              padding: "0.3rem 0.75rem",
+              borderRadius: "3px",
+              cursor: isRendering ? "wait" : rangeValid ? "pointer" : "not-allowed",
+              fontWeight: 600,
+              opacity: isRendering ? 0.7 : 1,
+            }}
+          >
+            {isRendering ? "Computing…" : "Show Ion Image"}
+          </button>
+        </div>
+        {/* Row 2: rendering options */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+          <label style={{ fontWeight: 600, minWidth: "5rem", color: "#555", fontSize: "0.8rem" }}>Display</label>
+          <select
+            value={colormap}
+            onChange={(e) => handleColormapSettings(e.target.value as Colormap)}
+            style={{ fontSize: "0.8rem" }}
+            aria-label="colormap"
+          >
+            <option value="viridis">viridis</option>
+            <option value="inferno">inferno</option>
+            <option value="gray">gray</option>
+          </select>
+          <select
+            value={scale}
+            onChange={(e) => handleColormapSettings(colormap, e.target.value as "linear" | "log")}
+            style={{ fontSize: "0.8rem" }}
+            aria-label="scale"
+          >
+            <option value="linear">linear</option>
+            <option value="log">log</option>
+          </select>
+          <select
+            value={String(percentile)}
+            onChange={(e) => handleColormapSettings(colormap, scale, Number(e.target.value))}
+            style={{ fontSize: "0.8rem" }}
+            aria-label="percentile clip"
+          >
+            <option value="0.9">90th pct</option>
+            <option value="0.95">95th pct</option>
+            <option value="0.99">99th pct</option>
+            <option value="0.999">99.9th pct</option>
+          </select>
+        </div>
       </div>
 
       {/* TIC and ion-image sections: only shown after grid is built (first Show Ion Image) */}

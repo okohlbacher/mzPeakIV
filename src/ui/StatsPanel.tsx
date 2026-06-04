@@ -1,56 +1,72 @@
+import type React from "react";
 import { useStore } from "../state/store";
 
+const MUTED_STYLE: React.CSSProperties = { color: "#888", fontStyle: "italic" };
+
+function Dash() {
+  return <span style={MUTED_STYLE}>—</span>;
+}
+
 /**
- * Displays per-file aggregate stats: spectrum/entity counts, m/z range (or
- * "not available" — R-02d), MS levels present, and profile/centroid breakdown
- * (R-02b).
+ * Left-panel summary: image dimensions (from grid), spectra count, m/z range,
+ * MS levels, and profile/centroid breakdown.
+ *
+ * Always renders when a file is open (capabilities set). Shows "—" for fields
+ * not yet available — grid and stats arrive lazily after first "Show Ion Image".
  */
 export function StatsPanel() {
   const stats = useStore((s) => s.stats);
+  const grid = useStore((s) => s.grid);
+  const capabilities = useStore((s) => s.capabilities);
 
-  if (!stats) return null;
+  if (!capabilities) return null;
 
-  const { numSpectra, numEntities, mzRange, msLevels, representationCounts } =
-    stats;
+  const mzRange = stats?.mzRange ?? null;
+  const numSpectra = stats?.numSpectra ?? null;
+  const msLevels = stats?.msLevels ?? [];
+  const repr = stats?.representationCounts;
 
   return (
     <section
       aria-label="stats-panel"
       data-testid="stats-panel"
-      style={{
-        padding: "0.5rem",
-        borderTop: "1px solid #eee",
-      }}
+      style={{ padding: "0.5rem", borderTop: "1px solid #eee" }}
     >
-      <h3 style={{ margin: "0 0 0.4rem" }}>Stats</h3>
+      <h3 style={{ margin: "0 0 0.4rem" }}>Image Info</h3>
 
       <table
         data-testid="stats-table"
         style={{ fontSize: "0.8rem", borderCollapse: "collapse", width: "100%" }}
       >
         <tbody>
+          {/* Image dimensions — available once grid is built */}
+          {capabilities.isImaging && (
+            <tr>
+              <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
+                Dimensions
+              </th>
+              <td data-testid="stat-dimensions">
+                {grid ? (
+                  <>
+                    {grid.width.toLocaleString()} × {grid.height.toLocaleString()}
+                    <span style={{ color: "#888" }}> px</span>
+                  </>
+                ) : (
+                  <Dash />
+                )}
+              </td>
+            </tr>
+          )}
+
           <tr>
-            <th
-              style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}
-            >
+            <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
               Spectra
             </th>
-            <td data-testid="stat-spectra">{numSpectra.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
-              Entities
-            </th>
-            <td data-testid="stat-entities">{numEntities.toLocaleString()}</td>
-          </tr>
-          <tr>
-            <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
-              MS levels
-            </th>
-            <td data-testid="stat-ms-levels">
-              {msLevels.length > 0 ? msLevels.join(", ") : "—"}
+            <td data-testid="stat-spectra">
+              {numSpectra !== null ? numSpectra.toLocaleString() : <Dash />}
             </td>
           </tr>
+
           <tr>
             <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
               m/z range
@@ -61,51 +77,57 @@ export function StatsPanel() {
                   {mzRange[0].toLocaleString(undefined, {
                     minimumFractionDigits: 1,
                     maximumFractionDigits: 2,
-                  })}{" "}
-                  –{" "}
+                  })}
+                  {" – "}
                   {mzRange[1].toLocaleString(undefined, {
                     minimumFractionDigits: 1,
                     maximumFractionDigits: 2,
-                  })}{" "}
-                  m/z
+                  })}
+                  {" Da"}
                 </>
               ) : (
-                <span
-                  data-testid="mz-range-unavailable"
-                  style={{ color: "#888", fontStyle: "italic" }}
-                >
-                  m/z range: not available
-                </span>
+                <Dash />
               )}
             </td>
           </tr>
-          <tr>
-            <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
-              Representation
-            </th>
-            <td data-testid="stat-representation">
-              {representationCounts.profile > 0 && (
-                <span data-testid="repr-profile">
-                  {representationCounts.profile.toLocaleString()} profile
-                </span>
-              )}
-              {representationCounts.profile > 0 &&
-                representationCounts.centroid > 0 && " · "}
-              {representationCounts.centroid > 0 && (
-                <span data-testid="repr-centroid">
-                  {representationCounts.centroid.toLocaleString()} centroid
-                </span>
-              )}
-              {representationCounts.profile === 0 &&
-                representationCounts.centroid === 0 && (
-                  <span style={{ color: "#888", fontStyle: "italic" }}>
-                    unknown
+
+          {msLevels.length > 0 && (
+            <tr>
+              <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
+                MS levels
+              </th>
+              <td data-testid="stat-ms-levels">{msLevels.join(", ")}</td>
+            </tr>
+          )}
+
+          {repr && (repr.profile > 0 || repr.centroid > 0) && (
+            <tr>
+              <th style={{ textAlign: "left", paddingRight: "0.75rem", fontWeight: 600 }}>
+                Mode
+              </th>
+              <td data-testid="stat-representation">
+                {repr.profile > 0 && (
+                  <span data-testid="repr-profile">
+                    {repr.profile.toLocaleString()} profile
                   </span>
                 )}
-            </td>
-          </tr>
+                {repr.profile > 0 && repr.centroid > 0 && " · "}
+                {repr.centroid > 0 && (
+                  <span data-testid="repr-centroid">
+                    {repr.centroid.toLocaleString()} centroid
+                  </span>
+                )}
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
+
+      {capabilities.isImaging && !grid && (
+        <p style={{ fontSize: "0.75rem", color: "#888", marginTop: "0.4rem", marginBottom: 0 }}>
+          Dimensions and counts will appear after the first ion image loads.
+        </p>
+      )}
     </section>
   );
 }
