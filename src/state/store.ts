@@ -14,6 +14,8 @@ import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
 import { buildTic } from "../compute/tic";
+import { buildIonImage, computeIonImageStats } from "../compute/ionImage";
+import { type Colormap } from "../ui/rasterize";
 import type { ImagingGrid } from "../imaging/types";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { ReaderErrorClass } from "../reader/errors";
@@ -73,12 +75,22 @@ type State = {
   error: StoreError | null;
   selectedIndex: number | null;
   selectedSpectrum: SpectrumArrays | null;
+  // Phase 4 additions — ion image, colormap, and scale state (IMAGE-02/IMAGE-03).
+  mzWindow: { mz: number; tolDa: number } | null;
+  ionImage: Float32Array | null;
+  ionImageStats: { nonzeroCount: number; min: number; max: number } | null;
+  colormap: Colormap;
+  scale: "linear" | "log";
+  percentile: number;
 };
 
 type Actions = {
   openUrl: (url: string) => Promise<void>;
   openFile: (file: File) => Promise<void>;
   selectSpectrum: (index: number) => Promise<void>;
+  // Phase 4 actions (IMAGE-02/IMAGE-03).
+  renderIonImage: (mz: number, tolDa: number) => Promise<void>;
+  setColormapSettings: (colormap: Colormap, scale: "linear" | "log", percentile: number) => void;
 };
 
 const initialState: State = {
@@ -94,6 +106,13 @@ const initialState: State = {
   error: null,
   selectedIndex: null,
   selectedSpectrum: null,
+  // Phase 4 defaults (D-08: Viridis default, D-10: linear default, D-09: 99th pct default).
+  mzWindow: null,
+  ionImage: null,
+  ionImageStats: null,
+  colormap: "viridis",
+  scale: "linear",
+  percentile: 0.99,
 };
 
 /** Shared load logic — runs the staged transitions after a reader is obtained. */
