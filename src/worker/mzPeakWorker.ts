@@ -233,14 +233,12 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 async function computeFastOverview(isImaging: boolean): Promise<void> {
   if (!activeZipStorage) return;
 
-  // Only show progress for imaging files (non-imaging has no TIC stage).
-  // Also wrap everything in try/catch — fast overview is best-effort; errors
-  // here must never surface to the user (the file already loaded successfully).
+  // Wrap everything in try/catch — fast overview is best-effort; errors
+  // must never surface to the user (the file already loaded successfully).
+  // Do NOT call postProgress() here — the store is already at "ready" stage
+  // from the first loadResult; sending "tic" would overwrite "ready" and
+  // leave the UI stuck in a loading state if the overview takes too long.
   try {
-  if (isImaging) {
-    postProgress("tic");
-    await yieldFrame();
-  }
 
   const metaBlob = await activeZipStorage.spectrumMetadata();
   if (!metaBlob) return;
