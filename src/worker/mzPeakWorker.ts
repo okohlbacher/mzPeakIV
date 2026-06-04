@@ -169,8 +169,8 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
     return;
   }
 
-  // Imaging: lightweight loadResult — no Parquet touched yet. Grid + TIC appear
-  // after the first "Show Ion Image" click (computed from spectra_data.parquet).
+  // Imaging: send lightweight loadResult immediately, then kick off buildGridFast
+  // in the background to populate grid+TIC+stats without waiting for user click.
   send({
     type: "loadResult",
     result: {
@@ -183,6 +183,28 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
       mixedRepresentationWarning: null,
     },
   });
+
+  // Background: build grid + TIC from metadata Parquet column chunks (~650 KB fetch).
+  // When complete, sends a second loadResult with grid+tic+stats so the TIC
+  // image appears automatically without the user clicking "Show Ion Image".
+  buildGridFast().then((result) => {
+    if (!result || !activeZipStorage) return;
+    const tic: Float32Array | null = result.tic ?? null;
+    const transferList: Transferable[] = [];
+    if (tic) transferList.push(tic.buffer);
+    sendTransfer({
+      type: "loadResult",
+      result: {
+        manifest: manifestFromStore(activeZipStorage),
+        fileMeta: null,
+        stats: result.stats,
+        capabilities,
+        grid: result.grid,
+        tic,
+        mixedRepresentationWarning: null,
+      },
+    }, transferList);
+  }).catch((e) => console.warn("[runFastLoad] background buildGridFast failed:", e));
 }
 
 // ---------------------------------------------------------------------------
