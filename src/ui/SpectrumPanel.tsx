@@ -78,7 +78,7 @@ export function SpectrumPanel() {
           labelSize: 18,
           size: 38,
           values: (_u, ticks) =>
-            ticks.map((t) => (t >= 1000 ? t.toFixed(1) : t.toFixed(2))),
+            (ticks ?? []).map((t) => (t >= 1000 ? t.toFixed(1) : t.toFixed(2))),
         },
         {
           label: "Intensity",
@@ -86,7 +86,7 @@ export function SpectrumPanel() {
           font: "10px system-ui",
           labelSize: 18,
           size: 52,
-          values: (_u, ticks) => ticks.map((t) => fmtIntensity(t)),
+          values: (_u, ticks) => (ticks ?? []).map((t) => fmtIntensity(t)),
         },
       ],
       padding: [4, 8, 0, 0],
@@ -108,7 +108,12 @@ export function SpectrumPanel() {
       },
     };
 
-    const plot = new uPlot(opts, [new Float64Array(0), new Float64Array(0)], el);
+    // Initialize with two dummy points so uPlot has valid scale ranges and
+    // can compute axis ticks without crashing (null ticks → forEach error).
+    const plot = new uPlot(opts, [
+      Float64Array.from([0, 1]),
+      Float64Array.from([0, 0]),
+    ], el);
     plotRef.current = plot;
 
     const onResize = () => {

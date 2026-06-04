@@ -192,47 +192,48 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; tic: Float32Array | null } | null> {
-  if (!activeZipStorage) return null;
+  if (!activeZipStorage) { console.log("[BGF] no ZipStorage"); return null; }
+  const T = () => Date.now();
+  const t0 = T();
+  const dt = (label: string) => console.log(`[BGF +${T()-t0}ms] ${label}`);
   try {
-    // Use direct HTTP fetch() to bypass zip.js/RemoteBlob for the column reads.
-    // RemoteBlob's HttpRangeReader may have issues in the Worker context;
-    // direct fetch() is more reliable and equally fast.
+    dt("start");
     const metaBlob = await activeZipStorage.spectrumMetadata();
-    if (!metaBlob) return null;
+    if (!metaBlob) { dt("no metaBlob"); return null; }
+    dt("got metaBlob size=" + (metaBlob as any).size);
 
-    // metaBlob.start is the absolute byte offset of the Parquet data in the ZIP file
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parquetStart = (metaBlob as any).start as number;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parquetSize = (metaBlob as any).size as number;
+    dt(`parquetStart=${parquetStart} parquetSize=${parquetSize}`);
 
-    if (!activeFileUrl) {
-      console.warn("[buildGridFast] no file URL — cannot use direct fetch");
-      return null;
-    }
+    if (!activeFileUrl) { dt("no fileUrl"); return null; }
 
-    // Helper: fetch a byte range from the ZIP file and return as ArrayBuffer
     const fetchRange = async (offset: number, size: number): Promise<ArrayBuffer> => {
       const abs = parquetStart + offset;
+      dt(`  fetch bytes ${abs}-${abs+size-1} (${(size/1024).toFixed(1)}KB)`);
+      const t1 = T();
       const resp = await fetch(activeFileUrl!, {
         headers: { Range: `bytes=${abs}-${abs + size - 1}` },
       });
       if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status} for range ${abs}-${abs+size-1}`);
-      return resp.arrayBuffer();
+      const buf = await resp.arrayBuffer();
+      dt(`  fetch done in ${T()-t1}ms, got ${buf.byteLength}B`);
+      return buf;
     };
 
-    // Build a blob-like object using fetchRange for the footer parser
     const blobLike = {
       size: parquetSize,
-      slice: (s: number, e: number) => ({
-        arrayBuffer: () => fetchRange(s, e - s),
-      }),
+      slice: (s: number, e: number) => ({ arrayBuffer: () => fetchRange(s, e - s) }),
     };
 
+    dt("reading footer...");
     const footerBytes = await readParquetFooter(blobLike);
+    dt(`footer ${footerBytes.byteLength}B read, parsing...`);
     const colInfoMap = decodeFooter(footerBytes);
+    dt(`decoded footer, ${colInfoMap.size} columns found`);
 
-    // Target columns: coordinates + TIC + m/z range
     const targetPaths = [
       ["scan", "IMS_1000050_position_x"],
       ["scan", "IMS_1000051_position_y"],
@@ -240,7 +241,6 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       ["spectrum", "MS_1000527_highest_observed_mz_unit_MS_1000040"],
       ["spectrum", "MS_1000528_lowest_observed_mz_unit_MS_1000040"],
     ];
-    // Parquet type codes: INT64=2, FLOAT=4, DOUBLE=5
     const pathTypes: Record<string, number> = {
       "scan.IMS_1000050_position_x": 2,
       "scan.IMS_1000051_position_y": 2,
@@ -253,50 +253,48 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     for (const path of targetPaths) {
       const dotPath = path.join(".");
       const colInfo = colInfoMap.get(dotPath);
-      if (!colInfo) { console.warn("[buildGridFast] col not in footer:", dotPath); continue; }
-      // dictPageOffset=0 in new file → fetch from dataPageOffset directly
+      if (!colInfo) { dt(`MISSING col: ${dotPath}`); continue; }
+      dt(`fetching ${dotPath}: dp=${colInfo.dataPageOffset} dict=${colInfo.dictPageOffset} size=${colInfo.compressedSize}`);
       const fetchStart = colInfo.dictPageOffset > 0
         ? Math.min(colInfo.dictPageOffset, colInfo.dataPageOffset)
         : colInfo.dataPageOffset;
       const dataPageOffsetInChunk = colInfo.dataPageOffset - fetchStart;
       const buf = await blobLike.slice(fetchStart, fetchStart + colInfo.compressedSize).arrayBuffer();
+      dt(`  got ${buf.byteLength}B`);
       chunks.push({
-        path,
-        parquetType: pathTypes[dotPath] ?? 5,
-        codec: 6, // ZSTD
-        encodings: [0, 3, 8], // PLAIN, RLE, RLE_DICTIONARY
+        path, parquetType: pathTypes[dotPath] ?? 5,
+        codec: 6, encodings: [0, 3, 8],
         data: new Uint8Array(buf),
         numValues: colInfo.numValues || 0,
         uncompressedSize: colInfo.uncompressedSize,
         dataPageOffsetInChunk,
       });
     }
-    if (chunks.length < 2) { console.warn("[buildGridFast] not enough columns:", chunks.length); return null; }
+    if (chunks.length < 2) { dt(`not enough cols: ${chunks.length}`); return null; }
 
     const totalRows = chunks[0].numValues;
-    console.log("[buildGridFast] fetched", chunks.length, "cols,",
-      (chunks.reduce((s,c)=>s+c.data.length,0)/1024).toFixed(1), "KB for", totalRows, "rows");
+    const totalKB = (chunks.reduce((s,c)=>s+c.data.length,0)/1024).toFixed(1);
+    dt(`building mini-Parquet: ${chunks.length} cols, ${totalKB}KB, ${totalRows} rows`);
 
-    // Decode the 5-column mini Parquet file (simple types only — no large_list complexity)
     const miniParquet = buildMiniParquet(chunks, totalRows);
+    dt(`mini-Parquet built: ${miniParquet.byteLength}B — calling readParquet...`);
     const rawTable = readParquet(miniParquet);
+    dt("readParquet done — converting to Arrow...");
     const table = tableFromIPC(rawTable.intoIPCStream());
+    dt(`Arrow table: ${table.numRows} rows`);
 
     const nRows = table.numRows;
-    if (nRows === 0) return null;
-    console.log("[buildGridFast] decoded", nRows, "rows");
+    if (nRows === 0) { dt("0 rows!"); return null; }
 
-    // Extract X, Y, TIC, m/z range via row iteration
+    dt(`row iteration (${nRows} rows)...`);
     const xArr: number[] = new Array(nRows);
     const yArr: number[] = new Array(nRows);
     const ticArr: number[] = new Array(nRows);
     let globalMinMz = Infinity, globalMaxMz = -Infinity;
-
     for (let r = 0; r < nRows; r++) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = table.get(r) as any;
-      const scan = row?.scan;
-      const spec = row?.spectrum;
+      const scan = row?.scan; const spec = row?.spectrum;
       xArr[r] = Number(scan?.IMS_1000050_position_x ?? 0);
       yArr[r] = Number(scan?.IMS_1000051_position_y ?? 0);
       ticArr[r] = Number(spec?.MS_1000285_total_ion_current_unit_MS_1000131 ?? 0);
@@ -305,11 +303,13 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       if (lo > 0 && lo < globalMinMz) globalMinMz = lo;
       if (hi > globalMaxMz) globalMaxMz = hi;
     }
+    dt(`row iteration done — building grid...`);
 
     const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
     const spectrumIndices = Array.from({ length: nRows }, (_, i) => i);
     const grid = buildImagingGrid(coords, spectrumIndices, null, "promoted-columns");
-    if (!grid) return null;
+    if (!grid) { dt("buildImagingGrid returned null"); return null; }
+    dt(`grid ${grid.width}x${grid.height} — building TIC...`);
 
     const base = grid.coordinateBase ?? 1;
     const tic = new Float32Array(grid.width * grid.height);
@@ -327,10 +327,12 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     };
 
     activeGrid = grid;
-    console.log("[buildGridFast] grid", grid.width, "x", grid.height, "TIC ready");
+    dt(`DONE ✓ grid=${grid.width}x${grid.height} tic.length=${tic.length} mzRange=[${globalMinMz.toFixed(1)},${globalMaxMz.toFixed(1)}]`);
     return { grid, stats, tic };
   } catch (e) {
-    const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    const errMsg = e instanceof Error ? `${e.name}: ${e.message}
+${(e as Error).stack?.split("\n").slice(0,3).join(" | ")}` : String(e);
+    console.error("[BGF] EXCEPTION:", errMsg);
     send({ type: "error", class: "corrupt", message: `[buildGridFast] ${errMsg}` });
     return null;
   }
