@@ -97,9 +97,24 @@ class TR {
       case 6: this.uvarint64(); break;               // i64
       case 7: this.pos += 8; break;                  // double
       case 8: this.skipStr(); break;                 // string/binary
-      case 9: case 10: case 11: {                    // list/set/map
+      case 9: case 10: {                              // list/set: (count<<4)|elemType
         const [t, n] = this.listHeader();
         for (let i = 0; i < n; i++) this.skipType(t);
+        break;
+      }
+      case 11: {                                      // MAP: different header format!
+        // Thrift compact MAP: 1 byte = (keyType<<4)|valType, then count (unsigned varint)
+        // Empty map is encoded as single 0x00 byte.
+        const mapHeader = this.byte();
+        if (mapHeader !== 0) {
+          const keyType = (mapHeader >> 4) & 0x0f;
+          const valType = mapHeader & 0x0f;
+          const count = this.uvarint();
+          for (let i = 0; i < count; i++) {
+            this.skipType(keyType);
+            this.skipType(valType);
+          }
+        }
         break;
       }
       case 12: this.skipStruct(); break;             // struct
