@@ -324,10 +324,15 @@ describe("store.renderIonImage — dispatch and requestId", () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
-  it("does nothing when grid or stats are null", () => {
+  it("dispatches renderIonImage even when grid is null (lazy init — Worker handles it)", () => {
+    // After the lazy-load refactor, renderIonImage posts to the Worker regardless of
+    // grid/stats state. The Worker calls initReaderAndGrid() on the first call.
     useStore.setState({ grid: null });
     useStore.getState().renderIonImage(500, 0.5);
-    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockPostMessage).toHaveBeenCalledOnce();
+    const msg = mockPostMessage.mock.calls[0][0];
+    expect(msg.type).toBe("renderIonImage");
+    expect(msg.mz).toBe(500);
   });
 });
 

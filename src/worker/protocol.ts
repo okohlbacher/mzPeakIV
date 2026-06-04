@@ -100,6 +100,13 @@ export type LoadResult = {
   grid: ImagingGrid | null;
   tic: Float32Array | null;
   mixedRepresentationWarning: string | null;
+  /**
+   * Option C: base-peak m/z per pixel from column-projected metadata read.
+   * One value per grid cell (same indexing as tic). Used to render a false-color
+   * "dominant mass" overview heatmap without reading the full spectral data.
+   * Null when grid is not yet built or metadata columns are unavailable.
+   */
+  basePeakMz?: Float32Array | null;
 };
 
 /**

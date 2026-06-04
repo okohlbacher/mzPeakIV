@@ -10,6 +10,8 @@
 // DO NOT: import from ../state/store, instantiate `new Worker(...)` in this file.
 
 import { ZipStorage } from "mzpeakts";
+import { ParquetFile } from "parquet-wasm";
+import { tableFromIPC } from "apache-arrow";
 import { openReaderFromStore, type Reader } from "../reader/openUrl";
 import {
   fileMeta as readFileMeta,
@@ -167,9 +169,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
     return;
   }
 
-  // Imaging: send loadResult with grid:null/tic:null — no Parquet touched yet.
-  // ImagingPanel renders with empty state; grid+XIC computed on first
-  // "Show Ion Image" click (renderIonImage message).
+  // Imaging: send lightweight loadResult first (no Parquet touched yet).
   send({
     type: "loadResult",
     result: {
@@ -182,6 +182,167 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
       mixedRepresentationWarning: null,
     },
   });
+
+  // Kick off the fast overview immediately after sending the initial loadResult.
+  // computeFastOverview reads only ~490 KB (3 column chunks) via column projection
+  // and sends a second loadResult with grid + TIC + basic stats filled in.
+  computeFastOverview().catch(postError);
+}
+
+// ---------------------------------------------------------------------------
+// Fast overview — Option A (TIC) + Option C (base-peak m/z map)
+// ---------------------------------------------------------------------------
+
+/**
+ * Column-projected read of spectra_metadata.parquet.
+ *
+ * Fetches only 5 of the hundreds of column chunks:
+ *   scan.IMS_1000050_position_x     ~2 KB  (X coordinates)
+ *   scan.IMS_1000051_position_y     ~0.5 KB (Y coordinates)
+ *   spectrum.MS_1000285_total_ion_current    ~185 KB (pre-computed TIC)
+ *   spectrum.MS_1000504_base_peak_mz        ~120 KB (dominant m/z per pixel)
+ *   spectrum.MS_1000527/28 highest/lowest mz ~450 KB (global m/z range)
+ *
+ * Total: ~760 KB vs 553 MB for a full read — a 700× savings.
+ * Parquet-wasm uses RemoteBlob.slice() under the hood so only the needed
+ * column chunks are fetched via HTTP range requests.
+ *
+ * Sends a second loadResult with:
+ *   - grid built from promoted IMS:1000050/51 columns (C2 correct)
+ *   - tic Float32Array (pre-computed TIC per pixel)
+ *   - basePeakMz Float32Array (base-peak m/z per pixel, for false-color)
+ *   - stats populated (numSpectra, m/z range)
+ */
+async function computeFastOverview(): Promise<void> {
+  if (!activeZipStorage) return;
+
+  postProgress("tic");
+  await yieldFrame();
+
+  const metaBlob = await activeZipStorage.spectrumMetadata();
+  if (!metaBlob) return;
+
+  // Column-projected read — parquet-wasm fetches only the requested columns
+  // via RemoteBlob.slice(offset, end).arrayBuffer() HTTP range requests.
+  const pf = await ParquetFile.fromFile(metaBlob as unknown as Blob);
+  const rawTable = await pf.read({
+    columns: [
+      "scan.IMS_1000050_position_x",
+      "scan.IMS_1000051_position_y",
+      "spectrum.MS_1000285_total_ion_current_unit_MS_1000131",
+      "spectrum.MS_1000504_base_peak_mz_unit_MS_1000040",
+      "spectrum.MS_1000527_highest_observed_mz_unit_MS_1000040",
+      "spectrum.MS_1000528_lowest_observed_mz_unit_MS_1000040",
+    ],
+  });
+  // parquet-wasm returns an FFI Arrow table; convert to apache-arrow Table.
+  const table = tableFromIPC(rawTable.intoIPCStream());
+
+  const nRows = table.numRows;
+  if (nRows === 0) return;
+
+  // Extract the struct columns then their leaf fields.
+  const scanCol = table.getChild("scan");
+  const specCol = table.getChild("spectrum");
+  if (!scanCol || !specCol) return;
+
+  const xCol = scanCol.getChild("IMS_1000050_position_x");
+  const yCol = scanCol.getChild("IMS_1000051_position_y");
+  const ticCol = specCol.getChild("MS_1000285_total_ion_current_unit_MS_1000131");
+  const bpMzCol = specCol.getChild("MS_1000504_base_peak_mz_unit_MS_1000040");
+  const maxMzCol = specCol.getChild("MS_1000527_highest_observed_mz_unit_MS_1000040");
+  const minMzCol = specCol.getChild("MS_1000528_lowest_observed_mz_unit_MS_1000040");
+  if (!xCol || !yCol || !ticCol) return;
+
+  // Build coords + indices for ImagingGrid.
+  const coords: Array<{ x: number; y: number }> = [];
+  const spectrumIndices: number[] = [];
+  for (let i = 0; i < nRows; i++) {
+    coords.push({ x: Number(xCol.get(i)), y: Number(yCol.get(i)) });
+    spectrumIndices.push(i);
+  }
+
+  const grid = buildImagingGrid(coords, spectrumIndices, null, "promoted-columns");
+  if (!grid) return;
+
+  // Option A: TIC image — pre-computed per spectrum in the Parquet metadata.
+  const tic = new Float32Array(grid.width * grid.height);
+  for (let i = 0; i < nRows; i++) {
+    const x0 = Number(xCol.get(i)) - (grid.coordinateBase ?? 1);
+    const y0 = Number(yCol.get(i)) - (grid.coordinateBase ?? 1);
+    const key = y0 * grid.width + x0;
+    if (key >= 0 && key < tic.length) {
+      tic[key] = (ticCol.get(i) as number) ?? 0;
+    }
+  }
+
+  // Option C: Base-peak m/z image — each pixel stores its dominant m/z.
+  // The ImagingPanel can render this as a false-color hue-by-mz map.
+  const basePeakMz = bpMzCol ? new Float32Array(grid.width * grid.height) : null;
+  if (basePeakMz && bpMzCol) {
+    for (let i = 0; i < nRows; i++) {
+      const x0 = Number(xCol.get(i)) - (grid.coordinateBase ?? 1);
+      const y0 = Number(yCol.get(i)) - (grid.coordinateBase ?? 1);
+      const key = y0 * grid.width + x0;
+      if (key >= 0 && key < basePeakMz.length) {
+        basePeakMz[key] = (bpMzCol.get(i) as number) ?? 0;
+      }
+    }
+  }
+
+  // Global m/z range from per-spectrum min/max columns.
+  let globalMinMz = Infinity;
+  let globalMaxMz = -Infinity;
+  if (minMzCol && maxMzCol) {
+    for (let i = 0; i < nRows; i++) {
+      const lo = minMzCol.get(i) as number;
+      const hi = maxMzCol.get(i) as number;
+      if (lo != null && lo < globalMinMz) globalMinMz = lo;
+      if (hi != null && hi > globalMaxMz) globalMaxMz = hi;
+    }
+  }
+
+  const stats: FileStats = {
+    numSpectra: nRows,
+    numEntities: nRows,
+    mzRange: Number.isFinite(globalMinMz) && Number.isFinite(globalMaxMz)
+      ? [globalMinMz, globalMaxMz] : null,
+    msLevels: [1],
+    representationCounts: { profile: 0, centroid: nRows },
+  };
+
+  // Store grid so renderIonImage can skip initReaderAndGrid for the grid itself.
+  // The activeReader is still null — the full MzPeakReader init (553 MB) is still
+  // deferred to the first renderIonImage call.
+  activeGrid = grid;
+
+  const manifest = manifestFromStore(activeZipStorage);
+  const capabilities = {
+    isImaging: true,
+    layout: "point" as const,
+    encodings: [] as string[],
+    unsupported: [] as { code: string; label: string }[],
+  };
+
+  const transferList: Transferable[] = [tic.buffer];
+  if (basePeakMz) transferList.push(basePeakMz.buffer);
+
+  sendTransfer(
+    {
+      type: "loadResult",
+      result: {
+        manifest,
+        fileMeta: null,
+        stats,
+        capabilities,
+        grid,
+        tic,
+        mixedRepresentationWarning: null,
+        basePeakMz: basePeakMz ?? null,
+      },
+    },
+    transferList,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -321,10 +482,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         if (!Number.isFinite(mz) || mz <= 0 || !Number.isFinite(tolDa) || tolDa <= 0) return;
         if (mz - tolDa < 0) return;
 
-        // LAZY INIT: on the first renderIonImage after a fast-path load, initialize
-        // the full reader and build the imaging grid. This reads spectra_metadata.parquet
-        // (~553 MB for HR2MSI) — intentionally deferred to the first user request.
-        if (!activeReader || !activeGrid) {
+        // LAZY INIT: the full MzPeakReader is needed for extractXIC.
+        // activeGrid may already be set by computeFastOverview (fast column projection),
+        // but activeReader is still null until the first renderIonImage.
+        if (!activeReader) {
           const ok = await initReaderAndGrid();
           if (!ok) return;
         }

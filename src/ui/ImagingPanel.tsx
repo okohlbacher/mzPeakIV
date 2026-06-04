@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useStore } from "../state/store";
-import { rasterizeTic, rasterizeImage, type Colormap } from "./rasterize";
+import { rasterizeTic, rasterizeImage, rasterizeBasePeakMap, type Colormap } from "./rasterize";
 import type { ImagingGrid } from "../imaging/types";
 
 // Warning amber (caution, NOT error) — reused from GridDiagnosticsPanel's WARNING
@@ -85,8 +85,15 @@ export function ImagingPanel() {
   const setColormapSettings = useStore((s) => s.setColormapSettings);
   const isRendering = useStore((s) => s.isRendering);
 
+  const basePeakMz = useStore((s) => s.basePeakMz);
+  const stats = useStore((s) => s.stats);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const bpCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Overview mode: "tic" shows TIC image, "basepeak" shows dominant-mass false-color
+  const [overviewMode, setOverviewMode] = useState<"tic" | "basepeak">("tic");
 
   const [readout, setReadout] = useState<{ text: string; muted: boolean }>({
     text: "",
@@ -143,6 +150,22 @@ export function ImagingPanel() {
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
   }, [selectedIndex, tic, grid]);
+
+  // Base-peak m/z overview paint — Option C false-color map.
+  useEffect(() => {
+    const canvas = bpCanvasRef.current;
+    if (!canvas || !grid || !basePeakMz) return;
+    const mzMin = stats?.mzRange?.[0] ?? 0;
+    const mzMax = stats?.mzRange?.[1] ?? 1000;
+    canvas.width = grid.width;
+    canvas.height = grid.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const rgba = rasterizeBasePeakMap(basePeakMz, grid, mzMin, mzMax);
+    const img = new ImageData(grid.width, grid.height);
+    img.data.set(rgba);
+    ctx.putImageData(img, 0, 0);
+  }, [basePeakMz, grid, stats]);
 
   // Phase 4 — ion image PAINT effect: rasterize the ion image with chosen colormap/scale/percentile.
   // Keyed on [ionImage, grid, colormap, scale, percentile].
@@ -394,7 +417,45 @@ export function ImagingPanel() {
         </div>
       )}
 
-      {grid && <h2 style={{ margin: "0 0 0.5rem" }}>TIC Image</h2>}
+      {grid && (
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1rem" }}>Overview</h2>
+          <div style={{ display: "flex", gap: 0, border: "1px solid #ccc", borderRadius: 4, overflow: "hidden", fontSize: "0.78rem" }}>
+            <button
+              onClick={() => setOverviewMode("tic")}
+              style={{
+                padding: "0.2rem 0.5rem",
+                background: overviewMode === "tic" ? "#1565c0" : "#fff",
+                color: overviewMode === "tic" ? "#fff" : "#333",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              TIC
+            </button>
+            {basePeakMz && (
+              <button
+                onClick={() => setOverviewMode("basepeak")}
+                style={{
+                  padding: "0.2rem 0.5rem",
+                  background: overviewMode === "basepeak" ? "#1565c0" : "#fff",
+                  color: overviewMode === "basepeak" ? "#fff" : "#333",
+                  border: "none",
+                  borderLeft: "1px solid #ccc",
+                  cursor: "pointer",
+                }}
+              >
+                Base Peak m/z
+              </button>
+            )}
+          </div>
+          {overviewMode === "basepeak" && stats?.mzRange && (
+            <span style={{ fontSize: "0.72rem", color: "#666" }}>
+              {stats.mzRange[0].toFixed(0)}–{stats.mzRange[1].toFixed(0)} Da hue scale
+            </span>
+          )}
+        </div>
+      )}
 
       {grid && mixedRepresentationWarning && (
         <div
@@ -405,12 +466,9 @@ export function ImagingPanel() {
         </div>
       )}
 
-      {grid && (tic === null ? (
-        <div
-          data-testid="tic-unavailable"
-          style={{ color: MUTED, fontSize: "0.8rem" }}
-        >
-          Could not compute TIC for this file
+      {grid && overviewMode === "tic" && (tic === null ? (
+        <div data-testid="tic-unavailable" style={{ color: MUTED, fontSize: "0.8rem" }}>
+          TIC not yet available
         </div>
       ) : (
         <canvas
@@ -419,15 +477,21 @@ export function ImagingPanel() {
           onMouseMove={onMove}
           onMouseLeave={onLeave}
           onClick={onTicClick}
-          style={{
-            width: displayWidth,
-            maxWidth: "100%",
-            aspectRatio: cssAspectRatio,
-            imageRendering: "pixelated",
-            cursor: "crosshair",
-            border: "1px solid #ddd",
-          }}
+          style={{ width: displayWidth, maxWidth: "100%", aspectRatio: cssAspectRatio, imageRendering: "pixelated", cursor: "crosshair", border: "1px solid #ddd" }}
         />
+      ))}
+
+      {grid && overviewMode === "basepeak" && (basePeakMz ? (
+        <canvas
+          ref={bpCanvasRef}
+          data-testid="basepeak-canvas"
+          onMouseMove={onMove}
+          onMouseLeave={onLeave}
+          onClick={onTicClick}
+          style={{ width: displayWidth, maxWidth: "100%", aspectRatio: cssAspectRatio, imageRendering: "pixelated", cursor: "crosshair", border: "1px solid #ddd" }}
+        />
+      ) : (
+        <div style={{ color: MUTED, fontSize: "0.8rem" }}>Base peak data not available</div>
       ))}
 
       {grid && (

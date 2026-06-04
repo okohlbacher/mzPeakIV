@@ -34,6 +34,12 @@ type State = {
   grid: ImagingGrid | null;
   /** TIC raster (length width*height) for the imaging grid; null when non-imaging or uncomputable (D-02). */
   tic: Float32Array | null;
+  /**
+   * Base-peak m/z image (Option C): one m/z value per grid cell indicating the
+   * dominant mass at each pixel. Built via fast column projection (~490 KB read)
+   * without the full 553 MB metadata download. Used for false-color overview.
+   */
+  basePeakMz: Float32Array | null;
   /** D-08 named warning: set only when a file mixes profile + centroid spectra. */
   mixedRepresentationWarning: string | null;
   stage: LoadStage;
@@ -67,6 +73,7 @@ const initialState: State = {
   capabilities: null,
   grid: null,
   tic: null,
+  basePeakMz: null,
   mixedRepresentationWarning: null,
   stage: "idle",
   error: null,
@@ -185,18 +192,24 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       // Spread LoadResult fields into state; store no longer holds reader handle.
       // Worker is the sole owner of the live Reader after Plan 05-03.
       const r = msg.result as LoadResult;
+      // Merge into existing state — only overwrite fields that are non-null in
+      // the message, so the second loadResult (fast overview) doesn't clobber the
+      // manifest or capabilities set by the first.
+      const prev = useStore.getState();
       useStore.setState({
-        manifest: r.manifest,
-        fileMeta: r.fileMeta,
-        stats: r.stats,
-        capabilities: r.capabilities,
-        grid: r.grid ?? null,
-        tic: r.tic ?? null,
-        mixedRepresentationWarning: r.mixedRepresentationWarning,
+        manifest: r.manifest ?? prev.manifest,
+        fileMeta: r.fileMeta ?? prev.fileMeta,
+        stats: r.stats ?? prev.stats,
+        capabilities: r.capabilities ?? prev.capabilities,
+        grid: r.grid ?? prev.grid,
+        tic: r.tic ?? prev.tic,
+        basePeakMz: r.basePeakMz ?? prev.basePeakMz,
+        mixedRepresentationWarning:
+          r.mixedRepresentationWarning ?? prev.mixedRepresentationWarning,
         stage: "ready",
         error: null,
-        selectedIndex: null,
-        selectedSpectrum: null,
+        selectedIndex: prev.selectedIndex,
+        selectedSpectrum: prev.selectedSpectrum,
       });
       break;
     }
