@@ -14,6 +14,8 @@ import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
 import { buildTic } from "../compute/tic";
+import { buildIonImage, computeIonImageStats } from "../compute/ionImage";
+import { type Colormap } from "../ui/rasterize";
 import type { ImagingGrid } from "../imaging/types";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { ReaderErrorClass } from "../reader/errors";
@@ -73,12 +75,22 @@ type State = {
   error: StoreError | null;
   selectedIndex: number | null;
   selectedSpectrum: SpectrumArrays | null;
+  // Phase 4 additions — ion image, colormap, and scale state (IMAGE-02/IMAGE-03).
+  mzWindow: { mz: number; tolDa: number } | null;
+  ionImage: Float32Array | null;
+  ionImageStats: { nonzeroCount: number; min: number; max: number } | null;
+  colormap: Colormap;
+  scale: "linear" | "log";
+  percentile: number;
 };
 
 type Actions = {
   openUrl: (url: string) => Promise<void>;
   openFile: (file: File) => Promise<void>;
   selectSpectrum: (index: number) => Promise<void>;
+  // Phase 4 actions (IMAGE-02/IMAGE-03).
+  renderIonImage: (mz: number, tolDa: number) => Promise<void>;
+  setColormapSettings: (colormap: Colormap, scale: "linear" | "log", percentile: number) => void;
 };
 
 const initialState: State = {
@@ -94,6 +106,13 @@ const initialState: State = {
   error: null,
   selectedIndex: null,
   selectedSpectrum: null,
+  // Phase 4 defaults (D-08: Viridis default, D-10: linear default, D-09: 99th pct default).
+  mzWindow: null,
+  ionImage: null,
+  ionImageStats: null,
+  colormap: "viridis",
+  scale: "linear",
+  percentile: 0.99,
 };
 
 /** Shared load logic — runs the staged transitions after a reader is obtained. */
@@ -252,5 +271,37 @@ export const useStore = create<State & Actions>((set, get) => ({
     } catch (err) {
       set({ stage: "error", error: classifyError(err) });
     }
+  },
+
+  // Phase 4: render an m/z-windowed ion image (IMAGE-02).
+  // This is the ONLY action that calls extractXIC with a non-null mzRange.
+  // setColormapSettings MUST NOT call extractXIC or reader (D-02/SC-5).
+  async renderIonImage(mz: number, tolDa: number) {
+    const { reader, grid, stats } = get();
+    if (!reader || !grid || !stats) return;
+    // V5 input validation (ASVS L1): reject non-finite, non-positive, or negative-window inputs.
+    // This is defense-in-depth — the button handler in ImagingPanel validates independently.
+    if (!Number.isFinite(mz) || mz <= 0 || !Number.isFinite(tolDa) || tolDa <= 0) return;
+    if (mz - tolDa < 0) return; // guard: negative mz start is non-physical (T-04-05)
+    try {
+      // D-08 majority rule: verbatim from store.ts:167-168 — do not re-derive.
+      const { profile, centroid } = stats.representationCounts;
+      const useProfile = profile >= centroid;
+      // Span1D shape {start, end} — NOT [min, max] tuple (Pitfall 3 / T-04-07).
+      const mzRange = { start: mz - tolDa, end: mz + tolDa };
+      const xic = await reader.extractXIC(null, mzRange, useProfile);
+      const ionImage = xic ? buildIonImage(xic, grid) : null;
+      const ionImageStats = ionImage ? computeIonImageStats(ionImage, grid) : null;
+      set({ ionImage, ionImageStats, mzWindow: { mz, tolDa } });
+    } catch (err) {
+      set({ stage: "error", error: classifyError(err) });
+    }
+  },
+
+  // Phase 4: update colormap/scale/percentile settings (IMAGE-03).
+  // Pure state mutation — no file I/O, no extractXIC. The render effect in
+  // ImagingPanel re-rasterizes the cached ionImage on colormap/scale change (D-02/SC-5).
+  setColormapSettings(colormap: Colormap, scale: "linear" | "log", percentile: number) {
+    set({ colormap, scale, percentile });
   },
 }));
