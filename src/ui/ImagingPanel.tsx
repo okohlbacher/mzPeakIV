@@ -196,18 +196,18 @@ export function ImagingPanel() {
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
   }, [selectedIndex, ionImage, grid, colormap, scale, percentile]);
 
-  if (!grid) return null;
-
-  // Aspect from pixel size (C5): x:y µm; default 1:1 when null. Cap display width
-  // to the pane and let height follow aspect; pixelated keeps cells crisp.
-  const aspect = grid.pixelSizeUm
-    ? grid.pixelSizeUm.x / grid.pixelSizeUm.y
+  // Grid is null until the first "Show Ion Image" click triggers lazy init.
+  // We still render the controls row so the user can enter m/z and load.
+  const aspect = grid
+    ? grid.pixelSizeUm
+      ? grid.pixelSizeUm.x / grid.pixelSizeUm.y
+      : 1
     : 1;
   const displayWidth = "100%";
-  // CSS aspect-ratio encodes (width:height) of the whole image: (cols*px.x):(rows*px.y).
-  const cssAspectRatio = `${grid.width * aspect} / ${grid.height}`;
-
-  const base = grid.coordinateBase;
+  const cssAspectRatio = grid
+    ? `${grid.width * aspect} / ${grid.height}`
+    : "1 / 1";
+  const base = grid?.coordinateBase ?? 1;
 
   function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
@@ -386,9 +386,16 @@ export function ImagingPanel() {
         </select>
       </div>
 
-      <h2 style={{ margin: "0 0 0.5rem" }}>TIC Image</h2>
+      {/* TIC and ion-image sections: only shown after grid is built (first Show Ion Image) */}
+      {!grid && (
+        <div style={{ color: "#888", fontSize: "0.85rem", padding: "0.5rem 0" }}>
+          Enter an m/z value and click <strong>Show Ion Image</strong> to load the imaging grid and render an ion image.
+        </div>
+      )}
 
-      {mixedRepresentationWarning && (
+      {grid && <h2 style={{ margin: "0 0 0.5rem" }}>TIC Image</h2>}
+
+      {grid && mixedRepresentationWarning && (
         <div
           data-testid="tic-mixed-warning"
           style={{ color: WARNING, fontSize: "0.8rem", marginBottom: "0.5rem" }}
@@ -397,7 +404,7 @@ export function ImagingPanel() {
         </div>
       )}
 
-      {tic === null ? (
+      {grid && (tic === null ? (
         <div
           data-testid="tic-unavailable"
           style={{ color: MUTED, fontSize: "0.8rem" }}
@@ -420,19 +427,21 @@ export function ImagingPanel() {
             border: "1px solid #ddd",
           }}
         />
-      )}
+      ))}
 
-      <div
-        data-testid="tic-hover-readout"
-        style={{
-          fontSize: "0.8rem",
-          minHeight: "1.2em",
-          marginTop: "0.5rem",
-          color: readout.muted ? MUTED : "#000",
-        }}
-      >
-        {readout.text}
-      </div>
+      {grid && (
+        <div
+          data-testid="tic-hover-readout"
+          style={{
+            fontSize: "0.8rem",
+            minHeight: "1.2em",
+            marginTop: "0.5rem",
+            color: readout.muted ? MUTED : "#000",
+          }}
+        >
+          {readout.text}
+        </div>
+      )}
 
       {/* Phase 4 ion-image section — D-04: only rendered after first Show Ion Image click */}
       {ionImage !== null && grid !== null && (
