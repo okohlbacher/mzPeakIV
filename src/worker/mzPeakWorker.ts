@@ -166,7 +166,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
     // Non-imaging: send lightweight noImaging immediately (no Parquet touched yet).
     send({ type: "noImaging", result: { manifest, fileMeta: null, stats: null, capabilities } });
     // Background: read stats columns (~450 KB) so Image Info + spectrum browser populate.
-    computeFastOverview(false).catch(postError);
+    computeFastOverview(false).catch((e) => console.warn("[mzPeakWorker] fast overview failed (non-fatal):", e));
     return;
   }
 
@@ -185,7 +185,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
   });
 
   // Background: column-projected read (~760 KB) builds grid + TIC + base-peak map.
-  computeFastOverview(true).catch(postError);
+  computeFastOverview(true).catch((e) => console.warn("[mzPeakWorker] fast overview failed (non-fatal):", e));
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +233,10 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 async function computeFastOverview(isImaging: boolean): Promise<void> {
   if (!activeZipStorage) return;
 
+  // Only show progress for imaging files (non-imaging has no TIC stage).
+  // Also wrap everything in try/catch — fast overview is best-effort; errors
+  // here must never surface to the user (the file already loaded successfully).
+  try {
   if (isImaging) {
     postProgress("tic");
     await yieldFrame();
@@ -368,6 +372,11 @@ async function computeFastOverview(isImaging: boolean): Promise<void> {
     },
     transferList,
   );
+  } catch (e) {
+    // Fast overview is best-effort — silently skip if column projection fails
+    // (e.g. file schema differs, RemoteBlob range issue, or parquet-wasm error).
+    console.warn("[mzPeakWorker] computeFastOverview failed (non-fatal):", e);
+  }
 }
 
 // ---------------------------------------------------------------------------
