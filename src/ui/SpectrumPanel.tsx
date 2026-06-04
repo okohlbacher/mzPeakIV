@@ -108,11 +108,10 @@ export function SpectrumPanel() {
       },
     };
 
-    // Initialize with two distinct non-zero points so uPlot has valid scale
-    // ranges on BOTH axes (zero-range axis also produces null ticks → crash).
+    // Use (0,0)→(1500,0) as placeholder: valid x-range, zero intensities.
     const plot = new uPlot(opts, [
-      Float64Array.from([0, 1000]),  // m/z range placeholder
-      Float64Array.from([0, 1]),     // intensity range placeholder
+      Float64Array.from([0, 1500]),
+      Float64Array.from([0, 0]),
     ], el);
     plotRef.current = plot;
 
@@ -134,8 +133,7 @@ export function SpectrumPanel() {
     const plot = plotRef.current;
     if (!plot) return;
     if (!selectedSpectrum) {
-      // Keep dummy data to avoid zero-range axis crash
-      plot.setData([Float64Array.from([0, 1000]), Float64Array.from([0, 1])]);
+      plot.setData([Float64Array.from([0, 1500]), Float64Array.from([0, 0])]);
       return;
     }
     plot.setData([

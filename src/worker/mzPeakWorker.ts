@@ -65,8 +65,6 @@ function sendTransfer(message: WorkerResponse, transfer: Transferable[]): void {
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let activeZipStorage: ZipStorage<any> | null = null;
-/** URL of the currently loaded file — for direct HTTP range requests */
-let activeFileUrl: string | null = null;
 let activeReader: Reader | null = null;
 let activeStats: FileStats | null = null;
 let activeGrid: ImagingGrid | null = null;
@@ -198,34 +196,35 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
   const dt = (label: string) => console.log(`[BGF +${T()-t0}ms] ${label}`);
   try {
     dt("start");
-    const metaBlob = await activeZipStorage.spectrumMetadata();
-    if (!metaBlob) { dt("no metaBlob"); return null; }
-    dt("got metaBlob size=" + (metaBlob as any).size);
+    // BUG FIX: spectrumMetadata() returns ParquetFile (not RemoteBlob).
+    // Use open(name) to get the actual RemoteBlob with .start/.size properties.
+    const metaEntry = activeZipStorage.fileIndex.files.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f: any) => f.entityType === "spectrum" && f.dataKind === "metadata",
+    );
+    if (!metaEntry) { dt("no metadata entry in fileIndex"); return null; }
+    dt(`metadata file: ${(metaEntry as any).name}`);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parquetStart = (metaBlob as any).start as number;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parquetSize = (metaBlob as any).size as number;
-    dt(`parquetStart=${parquetStart} parquetSize=${parquetSize}`);
+    const metaBlob = await activeZipStorage.open((metaEntry as any).name);
+    if (!metaBlob) { dt("open() returned null"); return null; }
+    dt(`metaBlob: start=${(metaBlob as any).start} size=${(metaBlob as any).size}`);
 
-    if (!activeFileUrl) { dt("no fileUrl"); return null; }
-
-    const fetchRange = async (offset: number, size: number): Promise<ArrayBuffer> => {
-      const abs = parquetStart + offset;
-      dt(`  fetch bytes ${abs}-${abs+size-1} (${(size/1024).toFixed(1)}KB)`);
-      const t1 = T();
-      const resp = await fetch(activeFileUrl!, {
-        headers: { Range: `bytes=${abs}-${abs + size - 1}` },
-      });
-      if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status} for range ${abs}-${abs+size-1}`);
-      const buf = await resp.arrayBuffer();
-      dt(`  fetch done in ${T()-t1}ms, got ${buf.byteLength}B`);
-      return buf;
-    };
-
+    // Use RemoteBlob.slice().arrayBuffer() directly — works for both URL and
+    // local file loads (HttpRangeReader and BlobReader respectively).
     const blobLike = {
-      size: parquetSize,
-      slice: (s: number, e: number) => ({ arrayBuffer: () => fetchRange(s, e - s) }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      size: (metaBlob as any).size as number,
+      slice: (s: number, e: number) => ({
+        arrayBuffer: async () => {
+          const t1 = T();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const slice = (metaBlob as any).slice(s, e);
+          const buf = await slice.arrayBuffer() as ArrayBuffer;
+          dt(`  slice(${s},${e}) → ${buf.byteLength}B in ${T()-t1}ms`);
+          return buf;
+        },
+      }),
     };
 
     dt("reading footer...");
@@ -605,7 +604,6 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       case "loadUrl": {
         // Reset ALL module-scope state before each new file load (Pitfall 5).
         activeZipStorage = null;
-        activeFileUrl = null;
         activeReader = null;
         activeStats = null;
         activeGrid = null;
@@ -613,7 +611,6 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
         // No Parquet data read here. Full reader init is deferred to first
         // renderIonImage / selectSpectrum call.
-        activeFileUrl = msg.url;
         activeZipStorage = await ZipStorage.fromUrl(msg.url);
         await runFastLoad(activeZipStorage);
         break;
@@ -629,8 +626,6 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // File objects cannot cross the Worker boundary (Pitfall 3 / Pattern 4).
         // The main thread transfers the ArrayBuffer; reconstruct a Blob here.
         const blob = new Blob([msg.bytes]);
-        activeFileUrl = null; // local file — no URL for direct HTTP reads
-
         // FAST PATH: BlobReader reads mzpeak_index.json only.
         activeZipStorage = await ZipStorage.fromBlob(blob);
         await runFastLoad(activeZipStorage);
