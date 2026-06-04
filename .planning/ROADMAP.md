@@ -102,8 +102,8 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 - [x] 04-01-PLAN.md — ionImage.ts compute + ionImage.test.ts (ppmToDa, buildIonImage, computeIonImageStats)
 - [x] 04-02-PLAN.md — rasterize.ts generalize + rasterize.test.ts (rasterizeImage, Inferno/Gray LUTs, log scaling)
 - [x] 04-03-PLAN.md — store.ts Phase 4 slice + renderIonImage + setColormapSettings actions
-- [ ] 04-04-PLAN.md — SpectrumPanel.tsx SPEC-02 m/z band via uPlot hooks.draw
-- [ ] 04-05-PLAN.md — ImagingPanel.tsx controls row + ion-image canvas + stats line
+- [x] 04-04-PLAN.md — SpectrumPanel.tsx SPEC-02 m/z band via uPlot hooks.draw
+- [x] 04-05-PLAN.md — ImagingPanel.tsx controls row + ion-image canvas + stats line
 - [ ] 04-06-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
 
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
@@ -134,7 +134,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete    | 2026-06-03 |
 | 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete    | 2026-06-03 |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 4/4 | Complete    | 2026-06-03 |
-| 4. Ion Image + Intensity Scaling | 3/6 | In Progress|  |
+| 4. Ion Image + Intensity Scaling | 5/6 | In Progress|  |
 | 5. Worker Offload, Robustness & Static Deploy | 0/? | Not started | - |
 
 ## Coverage
