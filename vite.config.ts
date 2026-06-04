@@ -35,6 +35,11 @@ export default defineConfig({
     target: "es2022",
     // Never inline the wasm — keep it a hashed asset for caching.
     assetsInlineLimit: 0,
+    // Explicit default: vite-plugin-top-level-await@1.6.0 reads config.build.assetsDir
+    // in its `config` hook; omitting it leaves the value undefined in the Worker
+    // sub-build context (Vite 8 + rolldown don't always inherit this default),
+    // which causes path.join(undefined, "[name].js") to throw.
+    assetsDir: "assets",
   },
   // CRITICAL: repeat wasm+topLevelAwait for Worker bundles — omitting this causes
   // production builds to fail with "ESM integration proposal for Wasm is not supported".
