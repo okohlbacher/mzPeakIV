@@ -18,6 +18,9 @@ const STAGE_LABEL: Record<LoadStage, string> = {
   grid: "Building imaging grid…",
   tic: "Rendering TIC image…",
   ready: "Ready",
+  // D-06: 'no-imaging' is a terminal state — not a progress step (not in STAGES array)
+  // but must appear in STAGE_LABEL to satisfy Record<LoadStage, string> exhaustiveness.
+  "no-imaging": "No Imaging Data",
   error: "Error",
 };
 
