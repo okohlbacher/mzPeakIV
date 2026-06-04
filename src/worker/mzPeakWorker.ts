@@ -262,7 +262,9 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       dt(`  got ${buf.byteLength}B`);
       chunks.push({
         path, parquetType: pathTypes[dotPath] ?? 5,
-        codec: 6, encodings: [0, 3, 8],
+        // dictPageOffset=0 → no dict page → PLAIN+RLE; >0 → include RLE_DICTIONARY.
+        codec: 6,
+        encodings: colInfo.dictPageOffset > 0 ? [0, 3, 8] : [0, 3],
         data: new Uint8Array(buf),
         numValues: colInfo.numValues || 0,
         uncompressedSize: colInfo.uncompressedSize,
