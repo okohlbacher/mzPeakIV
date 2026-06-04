@@ -18,11 +18,22 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock the Worker constructor globally before importing the store so the
-// module-scope `new Worker(...)` uses our fake implementation.
-const mockPostMessage = vi.fn();
-const mockWorker = { postMessage: mockPostMessage, onmessage: null as ((e: MessageEvent) => void) | null };
-vi.stubGlobal("Worker", vi.fn(() => mockWorker));
+// vi.hoisted() is transformed to run before static imports, so store.ts sees
+// the mock Worker when it evaluates `new Worker(...)` at module scope.
+// Arrow functions cannot be constructors, so use a regular named function.
+// When a constructor returns an object, JS uses that object as the instance.
+const { mockPostMessage, mockWorker } = vi.hoisted(() => {
+  const mockPostMessage = vi.fn();
+  const mockWorker = {
+    postMessage: mockPostMessage,
+    onmessage: null as ((e: MessageEvent) => void) | null,
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).Worker = function MockWorker() {
+    return mockWorker;
+  };
+  return { mockPostMessage, mockWorker };
+});
 
 import { useStore } from "./store";
 

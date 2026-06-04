@@ -11,6 +11,8 @@ export default mergeConfig(
       // these on the global, but jsdom gives DOM bits the UI store may touch.
       environment: "node",
       include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+      // Polyfills that must be defined before any module is imported by tests.
+      setupFiles: ["./src/test-setup.ts"],
       // The WASM init + first Parquet read against a real ~2 MB fixture can be slow.
       testTimeout: 30000,
       hookTimeout: 30000,
