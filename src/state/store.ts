@@ -102,13 +102,27 @@ export const useStore = create<State & Actions>((set, get) => ({
   ...initialState,
 
   openUrl(url: string) {
+    currentRequestId = Date.now();
     set({ ...initialState, stage: "zip-index" });
     worker.postMessage({ type: "loadUrl", url } satisfies WorkerRequest);
   },
 
   async openFile(file: File) {
+    currentRequestId = Date.now();
     set({ ...initialState, stage: "zip-index" });
-    const buffer = await file.arrayBuffer();
+    let buffer: ArrayBuffer;
+    try {
+      buffer = await file.arrayBuffer();
+    } catch (err) {
+      set({
+        stage: "error",
+        error: {
+          class: "corrupt",
+          message: `Could not read file: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      });
+      return;
+    }
     // Transfer ownership of the ArrayBuffer to the Worker (Pattern 4 / Pitfall 3).
     // File objects cannot cross the Worker boundary reliably — convert to ArrayBuffer
     // on the main thread first, then transfer the buffer zero-copy.
@@ -238,4 +252,22 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       });
       break;
   }
+};
+
+worker.onerror = (e: ErrorEvent): void => {
+  console.error("[mzPeakWorker] uncaught error:", e.message, e);
+  useStore.setState({
+    stage: "error",
+    error: { class: "corrupt", message: `Worker error: ${e.message}` },
+    isRendering: false,
+  });
+};
+
+worker.onmessageerror = (e: MessageEvent): void => {
+  console.error("[mzPeakWorker] message deserialization error:", e);
+  useStore.setState({
+    stage: "error",
+    error: { class: "corrupt", message: "Worker message could not be deserialized." },
+    isRendering: false,
+  });
 };
