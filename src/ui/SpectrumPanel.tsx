@@ -5,29 +5,17 @@ import "uplot/dist/uPlot.min.css";
 import { useStore } from "../state/store";
 
 /**
- * SPEC-02 architectural placeholder. An m/z window the spectrum could mark, but
- * there is NO m/z-selection source in Phase 3 — the marker UI is genuinely
- * Phase-4-gated (CONTEXT/RESEARCH A4 defer it). This prop is threaded as a no-op
- * so Phase 4 can wire the marker without changing the component signature. No
- * marker is drawn in Phase 3 (there is nothing to mark).
- */
-export type MzWindow = { center: number; lo: number; hi: number };
-
-interface SpectrumPanelProps {
-  /** SPEC-02 placeholder — unused in Phase 3 (no m/z state). Defaults to null. */
-  mzWindow?: MzWindow | null;
-}
-
-/**
  * Right-hand spectrum panel: a numeric spectrum-index selector wired to
  * `selectSpectrum` -> `getSpectrumArrays`, and a uPlot chart mounted imperatively
  * via `useRef` (no React wrapper) plotting m/z vs intensity. In imaging mode the
  * heading reflects the clicked pixel's 1-based coordinates.
+ *
+ * SPEC-02: reads `mzWindow` from the store and draws a translucent amber band
+ * over [mz - tolDa, mz + tolDa] via uPlot hooks.draw. The band is absent when
+ * mzWindow is null (TIC-only state) and updates on every redraw (Pitfall 5 safe).
  */
-export function SpectrumPanel(_props: SpectrumPanelProps = {}) {
-  // SPEC-02: mzWindow is accepted but intentionally unused in Phase 3 — see the
-  // MzWindow doc above. Phase 4 (IMAGE-03/SPEC-02) will read it to draw a marker.
-  void _props.mzWindow;
+export function SpectrumPanel() {
+  const mzWindow = useStore((s) => s.mzWindow);
 
   const stats = useStore((s) => s.stats);
   const grid = useStore((s) => s.grid);
@@ -37,6 +25,9 @@ export function SpectrumPanel(_props: SpectrumPanelProps = {}) {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
+  // SPEC-02: ref for the mzWindow so the draw hook always reads the latest value
+  // without needing to destroy/recreate the plot (Pitfall 5 — band frozen on zoom).
+  const mzWindowRef = useRef<{ mz: number; tolDa: number } | null>(null);
 
   const numSpectra = stats?.numSpectra ?? 0;
 
@@ -79,6 +70,26 @@ export function SpectrumPanel(_props: SpectrumPanelProps = {}) {
         },
       ],
       axes: [{ label: "m/z" }, { label: "intensity" }],
+      // SPEC-02: draw a translucent amber band over [mz - tolDa, mz + tolDa].
+      // valToPos(..., "x", true) returns device-pixel coords matching ctx.
+      // ctx.save/restore prevents fillStyle from leaking into subsequent draws.
+      // The hook reads mzWindowRef.current so it always uses the latest value
+      // without destroying/recreating the plot on every mzWindow change (Pitfall 5).
+      hooks: {
+        draw: [
+          (u: uPlot) => {
+            const w = mzWindowRef.current;
+            if (!w) return;
+            const xLo = u.valToPos(w.mz - w.tolDa, "x", true);
+            const xHi = u.valToPos(w.mz + w.tolDa, "x", true);
+            const { ctx } = u;
+            ctx.save();
+            ctx.fillStyle = "rgba(255,200,0,0.25)";
+            ctx.fillRect(xLo, u.bbox.top, xHi - xLo, u.bbox.height);
+            ctx.restore();
+          },
+        ],
+      },
     };
 
     const plot = new uPlot(opts, [new Float64Array(0), new Float64Array(0)], el);
@@ -115,6 +126,14 @@ export function SpectrumPanel(_props: SpectrumPanelProps = {}) {
       selectedSpectrum.intensity as unknown as number[],
     ]);
   }, [selectedSpectrum]);
+
+  // SPEC-02: sync mzWindow from the store into the ref and trigger a uPlot redraw
+  // so hooks.draw fires with the updated band coordinates. The plot is not destroyed
+  // or recreated — only redraw() is called (Pitfall 5 avoided).
+  useEffect(() => {
+    mzWindowRef.current = mzWindow;
+    plotRef.current?.redraw();
+  }, [mzWindow]);
 
   return (
     <section
