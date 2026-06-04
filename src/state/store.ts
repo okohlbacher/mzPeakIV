@@ -98,7 +98,7 @@ const worker = new Worker(
 // response; mismatched IDs are silently discarded on the main thread.
 let currentRequestId = 0;
 
-export const useStore = create<State & Actions>((set, get) => ({
+export const useStore = create<State & Actions>((set) => ({
   ...initialState,
 
   openUrl(url: string) {
@@ -143,10 +143,10 @@ export const useStore = create<State & Actions>((set, get) => ({
   // This action now dispatches to the Worker instead of running inline.
   // setColormapSettings MUST NOT call extractXIC or reader (D-02/SC-5).
   renderIonImage(mz: number, tolDa: number) {
-    const { grid, stats } = get();
-    if (!grid || !stats) return;
     // V5 input validation (ASVS L1): reject non-finite, non-positive, or negative-window inputs.
     // This is defense-in-depth — the Worker also validates (T-05-02).
+    // NOTE: grid/stats are NOT checked here — they may be null (lazy load). The Worker
+    // calls initReaderAndGrid() on the first renderIonImage if needed, then runs the XIC.
     if (!Number.isFinite(mz) || mz <= 0 || !Number.isFinite(tolDa) || tolDa <= 0) return;
     if (mz - tolDa < 0) return; // guard: negative mz start is non-physical (T-04-05)
     const rid = ++currentRequestId;
