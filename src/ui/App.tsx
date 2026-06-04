@@ -50,17 +50,44 @@ export function App() {
                   ? "Building imaging grid…"
                   : stage === "tic"
                     ? "Building TIC image…"
-                    : stage === "ready"
-                      ? "Ready"
-                      : stage === "error"
-                        ? "Error"
-                        : "Idle"}
+                    : stage === "no-imaging"
+                      ? "No Imaging Data"
+                      : stage === "ready"
+                        ? "Ready"
+                        : stage === "error"
+                          ? "Error"
+                          : "Idle"}
         </span>
       </header>
 
       <ProgressBar stage={stage} />
 
       {stage === "error" && error && <ErrorBanner error={error} />}
+
+      {stage === "no-imaging" && (
+        <main style={{ display: "flex", flex: 1, minHeight: 0 }}>
+          <aside
+            style={{
+              width: 400,
+              flexShrink: 0,
+              overflow: "auto",
+              borderRight: "1px solid #ddd",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <MetadataPanel />
+            <StatsPanel />
+            <CapabilitiesPanel />
+            {/* GridDiagnosticsPanel omitted — no grid for non-imaging files */}
+          </aside>
+          <div style={{ padding: "1.5rem", color: "#555", flex: 1, overflow: "auto" }}>
+            <p>This file contains mass spectra but no spatial imaging coordinates.</p>
+            <p>Open an imaging file to explore ion images.</p>
+            <SpectrumPanel />
+          </div>
+        </main>
+      )}
 
       {stage === "ready" && (
         <main style={{ display: "flex", flex: 1, minHeight: 0 }}>
