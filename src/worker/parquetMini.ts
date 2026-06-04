@@ -200,23 +200,32 @@ function encodeFooter(cols: ColChunk[], offsets: number[], numRows: number): Uin
   // field 1: version = 2 (FORMAT_VERSION_2)
   fid = w.fh(fid, 1, T.I32); w.i32(2);
 
-  // field 2: schema (list<SchemaElement>)
+  // field 2: schema (list<SchemaElement>) in Parquet DFS traversal order:
+  //   root → (parent → its leaves)* → top-level leaves
+  // CRITICAL: schema elements MUST be in DFS order — children immediately follow parent.
   fid = w.fh(fid, 2, T.LIST);
   {
-    const schemaCount = 1 + parents.length + cols.length; // root + parents + leaves
+    const schemaCount = 1 + parents.length + cols.length;
     w.list(T.STRUCT, schemaCount);
 
     // Root message element
     writeSchemaElement(w, "schema", undefined, Rep.REQUIRED, topLevelCount);
 
-    // Parent structs (no type = group/struct)
+    // DFS: for each parent, write the parent struct then its leaf children immediately
     for (const parent of parents) {
       writeSchemaElement(w, parent, undefined, Rep.OPTIONAL, childCount.get(parent) ?? 1);
+      for (const col of cols) {
+        if (col.path[0] === parent && col.path.length > 1) {
+          writeSchemaElement(w, col.path[col.path.length - 1], col.parquetType, Rep.OPTIONAL, undefined);
+        }
+      }
     }
 
-    // Leaf columns
+    // Top-level leaf columns (path.length === 1)
     for (const col of cols) {
-      writeSchemaElement(w, col.path[col.path.length - 1], col.parquetType, Rep.OPTIONAL, undefined);
+      if (col.path.length === 1) {
+        writeSchemaElement(w, col.path[0], col.parquetType, Rep.OPTIONAL, undefined);
+      }
     }
   }
 
