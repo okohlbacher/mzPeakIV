@@ -10,8 +10,9 @@
 // DO NOT: import from ../state/store, instantiate `new Worker(...)` in this file.
 
 import { ZipStorage } from "mzpeakts";
-import { ParquetFile } from "parquet-wasm";
+import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
+import { buildMiniParquet, type ColChunk } from "./parquetMini";
 import { openReaderFromStore, type Reader } from "../reader/openUrl";
 import {
   fileMeta as readFileMeta,
@@ -184,78 +185,144 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Fast grid build — reads only coordinate columns via row-group iteration
+// Fast grid build — direct Parquet column chunk reads (~188 KB total)
 // ---------------------------------------------------------------------------
 
+/** Target column descriptor for the metadata Parquet. */
+interface MetaColTarget {
+  path: string[];
+  parquetType: number;
+}
+
+const META_TARGETS: MetaColTarget[] = [
+  { path: ["scan", "IMS_1000050_position_x"],                                     parquetType: 2 /* INT64 */ },
+  { path: ["scan", "IMS_1000051_position_y"],                                      parquetType: 2 /* INT64 */ },
+  { path: ["spectrum", "MS_1000285_total_ion_current_unit_MS_1000131"],            parquetType: 4 /* FLOAT */ },
+  { path: ["spectrum", "MS_1000527_highest_observed_mz_unit_MS_1000040"],          parquetType: 5 /* DOUBLE */ },
+  { path: ["spectrum", "MS_1000528_lowest_observed_mz_unit_MS_1000040"],           parquetType: 5 /* DOUBLE */ },
+];
+
 /**
- * Build the imaging grid from spectra_metadata.parquet using parquet-wasm's
- * row-group reading, but requesting ONLY the top-level `scan` column.
+ * Build the imaging grid by fetching ONLY the 5 needed leaf column chunks
+ * from spectra_metadata.parquet via targeted HTTP range requests.
  *
- * We can't use dotted-path column projection (parquet-wasm reads the entire
- * parent column). Instead we read one row group at a time, extract only the
- * IMS coordinate fields, and discard all other scan data.
+ * Total data transferred: ~650 KB (vs 553 MB for the full file).
  *
- * Row groups are ~900 rows each (~39 total). Each row group decompresses to
- * ~20 MB. By processing row groups sequentially and discarding each after
- * extracting coordinates, peak memory stays bounded.
- *
- * Returns the ImagingGrid and basic stats, or null on failure.
+ * Strategy:
+ *   1. ParquetFile.fromFile(blob) → reads Parquet footer only (~33 KB range request)
+ *   2. Extract byte offsets + sizes for target leaf columns via parquet-wasm metadata API
+ *   3. Fetch each column chunk via RemoteBlob.slice().arrayBuffer() (5 range requests)
+ *   4. Build a minimal valid Parquet file in memory using parquetMini
+ *   5. Decode with parquet-wasm's readParquetStream()
  */
-async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats } | null> {
+async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; tic: Float32Array | null } | null> {
   if (!activeZipStorage) return null;
   try {
     const metaBlob = await activeZipStorage.spectrumMetadata();
     if (!metaBlob) return null;
 
+    // Step 1: read footer only (~33 KB range request at end of 553 MB file)
     const pf = await ParquetFile.fromFile(metaBlob as unknown as Blob);
     const meta = pf.metadata();
+
+    // All data is in a single row group (confirmed for HR2MSI + similar files)
+    // If multiple row groups exist, sum rows from all.
     const nRG = meta.numRowGroups();
-    // numRows is a property on RowGroupMetaData, not ParquetMetaData directly — sum row groups
-    let nRows = 0;
-    for (let rg = 0; rg < nRG; rg++) nRows += meta.rowGroup(rg).numRows();
+    let totalRows = 0;
+    for (let rg = 0; rg < nRG; rg++) totalRows += meta.rowGroup(rg).numRows();
 
-    const coords: Array<{ x: number; y: number }> = new Array(Number(nRows));
-    const spectrumIndices: number[] = new Array(Number(nRows));
-    let globalMinMz = Infinity, globalMaxMz = -Infinity;
-    let rowOffset = 0;
+    // Step 2: find target column chunk offsets via metadata API
+    // We look at row group 0 (if data is split across multiple RGs, each would need fetching)
+    const rg0 = meta.rowGroup(0);
+    const chunks: ColChunk[] = [];
 
-    for (let rg = 0; rg < nRG; rg++) {
-      // Read only the scan and spectrum columns for coordinates + TIC + m/z range.
-      // This is still the full scan column per row group (~5-10 MB/RG compressed),
-      // but avoids reading the massive parameters/scan_windows list columns.
-      const rawTable = await pf.read({ rowGroups: [rg], columns: ["scan", "spectrum"] });
-      const table = tableFromIPC(rawTable.intoIPCStream());
+    for (const target of META_TARGETS) {
+      const dotPath = target.path.join(".");
+      for (let c = 0; c < rg0.numColumns(); c++) {
+        const col = rg0.column(c);
+        if (col.columnPath().join(".") !== dotPath) continue;
 
-      for (let r = 0; r < table.numRows; r++) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const row = table.get(r) as any;
-        const scan = row?.scan;
-        const spec = row?.spectrum;
-        const x = Number(scan?.IMS_1000050_position_x ?? 0);
-        const y = Number(scan?.IMS_1000051_position_y ?? 0);
-        coords[rowOffset + r] = { x, y };
-        spectrumIndices[rowOffset + r] = rowOffset + r;
-        const loMz = Number(spec?.MS_1000528_lowest_observed_mz_unit_MS_1000040 ?? 0);
-        const hiMz = Number(spec?.MS_1000527_highest_observed_mz_unit_MS_1000040 ?? 0);
-        if (loMz > 0 && loMz < globalMinMz) globalMinMz = loMz;
-        if (hiMz > globalMaxMz) globalMaxMz = hiMz;
+        // Step 3: fetch this column chunk as raw bytes
+        // fileOffset() = ColumnChunk.file_offset = data_page_offset for single-file Parquet
+        const offset = Number(col.fileOffset());
+        const size = col.compressedSize();
+        const slice = (metaBlob as unknown as { slice(start: number, end: number): unknown }).slice(offset, offset + size);
+        // RemoteBlob.slice returns a new RemoteBlob; call arrayBuffer() to fetch
+        const buf = await (slice as { arrayBuffer(): Promise<ArrayBuffer> }).arrayBuffer();
+
+        const uncompressed = col.uncompressedSize();
+
+        chunks.push({
+          path: target.path,
+          parquetType: target.parquetType,
+          codec: 6, // ZSTD (confirmed by Python analysis)
+          encodings: [0, 3, 8], // PLAIN, RLE, RLE_DICTIONARY
+          data: new Uint8Array(buf),
+          numValues: rg0.numRows(),
+          uncompressedSize: typeof uncompressed === 'bigint' ? Number(uncompressed) : uncompressed,
+        });
+        break;
       }
-      rowOffset += table.numRows;
     }
+
+    if (chunks.length < 2) {
+      console.warn("[buildGridFast] could not find coordinate columns in metadata");
+      return null;
+    }
+
+    // Step 4+5: build mini Parquet file and decode with parquet-wasm readParquet()
+    const miniParquet = buildMiniParquet(chunks, totalRows);
+    const rawTable = readParquet(miniParquet);
+    const table = tableFromIPC(rawTable.intoIPCStream());
+
+    if (table.numRows === 0) return null;
+
+    // Extract arrays from the decoded Arrow table via row iteration
+    const xArr: number[] = [];
+    const yArr: number[] = [];
+    const ticArr: number[] = [];
+    let globalMinMz = Infinity, globalMaxMz = -Infinity;
+
+    for (let r = 0; r < table.numRows; r++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row = table.get(r) as any;
+      const scan = row?.scan;
+      const spec = row?.spectrum;
+      xArr.push(Number(scan?.IMS_1000050_position_x ?? 0));
+      yArr.push(Number(scan?.IMS_1000051_position_y ?? 0));
+      ticArr.push(Number(spec?.MS_1000285_total_ion_current_unit_MS_1000131 ?? 0));
+      const lo = Number(spec?.MS_1000528_lowest_observed_mz_unit_MS_1000040 ?? 0);
+      const hi = Number(spec?.MS_1000527_highest_observed_mz_unit_MS_1000040 ?? 0);
+      if (lo > 0 && lo < globalMinMz) globalMinMz = lo;
+      if (hi > globalMaxMz) globalMaxMz = hi;
+    }
+
+    const nRows = xArr.length;
+    const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
+    const spectrumIndices = Array.from({ length: nRows }, (_, i) => i);
 
     const grid = buildImagingGrid(coords, spectrumIndices, null, "promoted-columns");
     if (!grid) return null;
 
+    // Build TIC image
+    const base = grid.coordinateBase ?? 1;
+    const tic = new Float32Array(grid.width * grid.height);
+    for (let i = 0; i < nRows; i++) {
+      const x0 = xArr[i] - base, y0 = yArr[i] - base;
+      const key = y0 * grid.width + x0;
+      if (key >= 0 && key < tic.length) tic[key] = ticArr[i];
+    }
+
     const stats: FileStats = {
-      numSpectra: rowOffset,
-      numEntities: rowOffset,
+      numSpectra: nRows,
+      numEntities: nRows,
       mzRange: Number.isFinite(globalMinMz) ? [globalMinMz, globalMaxMz] : null,
       msLevels: [1],
-      representationCounts: { profile: 0, centroid: rowOffset },
+      representationCounts: { profile: 0, centroid: nRows },
     };
 
     activeGrid = grid;
-    return { grid, stats };
+    return { grid, stats, tic };
   } catch (e) {
     console.warn("[mzPeakWorker] buildGridFast failed:", e);
     return null;
@@ -565,15 +632,17 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         const mzStart = mz - tolDa;
         const mzEnd = mz + tolDa;
 
-        // FAST PATH: build grid from coordinate columns (row-group iteration of
-        // spectra_metadata.parquet — no full 553 MB read), then compute XIC from
-        // spectra_data.parquet (208 KB). The `scan` column read per row group is
-        // ~5-10 MB compressed, far less than the 553 MB full reader init.
+        // FAST PATH: fetch only 5 column chunks (~650 KB) via targeted range requests,
+        // decode with parquet-wasm, build grid + TIC from the decoded data.
+        // No 553 MB download — only the needed leaf column bytes are fetched.
         if (!activeGrid) {
           const result = await buildGridFast();
           if (result) {
             const manifest = activeZipStorage ? manifestFromStore(activeZipStorage) : [];
-            // Send stats + grid update so Image Info and TIC canvas populate.
+            const tic: Float32Array | null = result.tic ?? null;
+            const transferList: Transferable[] = [];
+            if (tic) transferList.push(tic.buffer);
+            // Send grid + TIC + stats — Image Info and TIC canvas populate immediately.
             sendTransfer({
               type: "loadResult",
               result: {
@@ -582,10 +651,10 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
                 stats: result.stats,
                 capabilities: { isImaging: true, layout: "point" as const, encodings: [], unsupported: [] },
                 grid: result.grid,
-                tic: null,
+                tic,
                 mixedRepresentationWarning: null,
               },
-            }, []);
+            }, transferList);
           }
         }
 
