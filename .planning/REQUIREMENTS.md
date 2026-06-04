@@ -28,8 +28,8 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 ### Spatial Images (IMAGE)
 
 - [x] **IMAGE-01**: App renders a TIC (total-ion-current) image as the default spatial overview.
-- [ ] **IMAGE-02**: App renders an ion image for a user-entered *m/z* with a tolerance specified in either Da or ppm.
-- [ ] **IMAGE-03**: User can choose a colormap and an intensity scaling mode (linear / log) with percentile clipping, so images are not blank on high-dynamic-range data.
+- [x] **IMAGE-02**: App renders an ion image for a user-entered *m/z* with a tolerance specified in either Da or ppm.
+- [x] **IMAGE-03**: User can choose a colormap and an intensity scaling mode (linear / log) with percentile clipping, so images are not blank on high-dynamic-range data.
 - [x] **IMAGE-04**: Hovering the image shows the pixel's (1-based) x/y and intensity readout; the image renders with the spec's **fixed mandatory orientation** — `M[row][col]`, col=x, row=y, pixel (1,1) top-left, y increasing downward, **no flip/transpose**, scan-direction terms ignored for display — and respects pixel aspect ratio from `IMS:1000046/47`.
 
 ### Spectrum View (SPEC)
@@ -85,6 +85,6 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | IMAGE-04 | Phase 3 | Complete |
 | SPEC-01 | Phase 3 | Complete |
 | SPEC-02 | Phase 3 | Complete |
-| IMAGE-02 | Phase 4 | Pending |
-| IMAGE-03 | Phase 4 | Pending |
+| IMAGE-02 | Phase 4 | Complete |
+| IMAGE-03 | Phase 4 | Complete |
 | UX-01 | Phase 5 | Pending |
