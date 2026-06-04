@@ -134,7 +134,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete    | 2026-06-03 |
 | 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete    | 2026-06-03 |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 4/4 | Complete    | 2026-06-03 |
-| 4. Ion Image + Intensity Scaling | 6/6 | Complete   | 2026-06-04 |
+| 4. Ion Image + Intensity Scaling | 8/8 | Complete   | 2026-06-04 |
 | 5. Worker Offload, Robustness & Static Deploy | 0/? | Not started | - |
 
 ## Coverage
