@@ -12,6 +12,8 @@
 import { ZipStorage } from "mzpeakts";
 import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
+import { buildMiniParquet, type ColChunk } from "./parquetMini";
+import { decodeFooter, readParquetFooter } from "./parquetFooter";
 import { openReaderFromStore, type Reader } from "../reader/openUrl";
 import {
   fileMeta as readFileMeta,
@@ -193,16 +195,72 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     const metaBlob = await activeZipStorage.spectrumMetadata();
     if (!metaBlob) return null;
 
-    // The spectra_metadata.parquet file is typically small (~1.5 MB for HR2MSI).
-    // Read it entirely and decode with parquet-wasm — no column projection needed.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const buf = await (metaBlob as any).arrayBuffer() as ArrayBuffer;
-    const rawTable = readParquet(new Uint8Array(buf));
+    // Strategy: parse the Parquet footer (~33 KB range request) to get exact
+    // byte offsets for the 5 needed leaf columns, fetch only those column chunks
+    // (~192 KB total), build a minimal valid Parquet file in memory, decode.
+    // This avoids reading the full file + its complex nested types (large_list<uint8>)
+    // that cause parquet-wasm to fail when reading the complete metadata Parquet.
+    const blobLike = metaBlob as unknown as {
+      size: number;
+      slice(s: number, e: number): { arrayBuffer(): Promise<ArrayBuffer> };
+    };
+
+    const footerBytes = await readParquetFooter(blobLike);
+    const colInfoMap = decodeFooter(footerBytes);
+
+    // Target columns: coordinates + TIC + m/z range
+    const targetPaths = [
+      ["scan", "IMS_1000050_position_x"],
+      ["scan", "IMS_1000051_position_y"],
+      ["spectrum", "MS_1000285_total_ion_current_unit_MS_1000131"],
+      ["spectrum", "MS_1000527_highest_observed_mz_unit_MS_1000040"],
+      ["spectrum", "MS_1000528_lowest_observed_mz_unit_MS_1000040"],
+    ];
+    // Parquet type codes: INT64=2, FLOAT=4, DOUBLE=5
+    const pathTypes: Record<string, number> = {
+      "scan.IMS_1000050_position_x": 2,
+      "scan.IMS_1000051_position_y": 2,
+      "spectrum.MS_1000285_total_ion_current_unit_MS_1000131": 4,
+      "spectrum.MS_1000527_highest_observed_mz_unit_MS_1000040": 5,
+      "spectrum.MS_1000528_lowest_observed_mz_unit_MS_1000040": 5,
+    };
+
+    const chunks: ColChunk[] = [];
+    for (const path of targetPaths) {
+      const dotPath = path.join(".");
+      const colInfo = colInfoMap.get(dotPath);
+      if (!colInfo) { console.warn("[buildGridFast] col not in footer:", dotPath); continue; }
+      // dictPageOffset=0 in new file → fetch from dataPageOffset directly
+      const fetchStart = colInfo.dictPageOffset > 0
+        ? Math.min(colInfo.dictPageOffset, colInfo.dataPageOffset)
+        : colInfo.dataPageOffset;
+      const dataPageOffsetInChunk = colInfo.dataPageOffset - fetchStart;
+      const buf = await blobLike.slice(fetchStart, fetchStart + colInfo.compressedSize).arrayBuffer();
+      chunks.push({
+        path,
+        parquetType: pathTypes[dotPath] ?? 5,
+        codec: 6, // ZSTD
+        encodings: [0, 3, 8], // PLAIN, RLE, RLE_DICTIONARY
+        data: new Uint8Array(buf),
+        numValues: colInfo.numValues || 0,
+        uncompressedSize: colInfo.uncompressedSize,
+        dataPageOffsetInChunk,
+      });
+    }
+    if (chunks.length < 2) { console.warn("[buildGridFast] not enough columns:", chunks.length); return null; }
+
+    const totalRows = chunks[0].numValues;
+    console.log("[buildGridFast] fetched", chunks.length, "cols,",
+      (chunks.reduce((s,c)=>s+c.data.length,0)/1024).toFixed(1), "KB for", totalRows, "rows");
+
+    // Decode the 5-column mini Parquet file (simple types only — no large_list complexity)
+    const miniParquet = buildMiniParquet(chunks, totalRows);
+    const rawTable = readParquet(miniParquet);
     const table = tableFromIPC(rawTable.intoIPCStream());
 
     const nRows = table.numRows;
     if (nRows === 0) return null;
-    console.log("[buildGridFast] decoded", nRows, "rows from", (buf.byteLength/1024).toFixed(1), "KB metadata");
+    console.log("[buildGridFast] decoded", nRows, "rows");
 
     // Extract X, Y, TIC, m/z range via row iteration
     const xArr: number[] = new Array(nRows);
