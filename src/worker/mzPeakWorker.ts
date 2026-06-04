@@ -12,8 +12,6 @@
 import { ZipStorage } from "mzpeakts";
 import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
-import { buildMiniParquet, type ColChunk } from "./parquetMini";
-import { decodeFooter, readParquetFooter } from "./parquetFooter";
 import { openReaderFromStore, type Reader } from "../reader/openUrl";
 import {
   fileMeta as readFileMeta,
@@ -189,132 +187,48 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 // Fast grid build — direct Parquet column chunk reads (~188 KB total)
 // ---------------------------------------------------------------------------
 
-/** Target column descriptor for the metadata Parquet. */
-interface MetaColTarget {
-  path: string[];
-  parquetType: number;
-}
-
-const META_TARGETS: MetaColTarget[] = [
-  { path: ["scan", "IMS_1000050_position_x"],                                     parquetType: 2 /* INT64 */ },
-  { path: ["scan", "IMS_1000051_position_y"],                                      parquetType: 2 /* INT64 */ },
-  { path: ["spectrum", "MS_1000285_total_ion_current_unit_MS_1000131"],            parquetType: 4 /* FLOAT */ },
-  { path: ["spectrum", "MS_1000527_highest_observed_mz_unit_MS_1000040"],          parquetType: 5 /* DOUBLE */ },
-  { path: ["spectrum", "MS_1000528_lowest_observed_mz_unit_MS_1000040"],           parquetType: 5 /* DOUBLE */ },
-];
-
-/**
- * Build the imaging grid by fetching ONLY the 5 needed leaf column chunks
- * from spectra_metadata.parquet via targeted HTTP range requests.
- *
- * Total data transferred: ~650 KB (vs 553 MB for the full file).
- *
- * Strategy:
- *   1. ParquetFile.fromFile(blob) → reads Parquet footer only (~33 KB range request)
- *   2. Extract byte offsets + sizes for target leaf columns via parquet-wasm metadata API
- *   3. Fetch each column chunk via RemoteBlob.slice().arrayBuffer() (5 range requests)
- *   4. Build a minimal valid Parquet file in memory using parquetMini
- *   5. Decode with parquet-wasm's readParquetStream()
- */
 async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; tic: Float32Array | null } | null> {
   if (!activeZipStorage) return null;
   try {
     const metaBlob = await activeZipStorage.spectrumMetadata();
     if (!metaBlob) return null;
 
-    // Step 1: parse the raw Parquet footer to get data_page_offset for each column.
-    // parquet-wasm's fileOffset() returns ColumnChunk.file_offset which is 0 (inline metadata)
-    // NOT data_page_offset — we need our own Thrift decoder for the correct value.
-    const blobLike = metaBlob as unknown as {
-      size: number;
-      slice(s: number, e: number): { arrayBuffer(): Promise<ArrayBuffer> };
-    };
-    const footerBytes = await readParquetFooter(blobLike);
-    const colInfoMap = decodeFooter(footerBytes);
-
-    // Get numRows from parquet-wasm (reliable)
-    const pf = await ParquetFile.fromFile(metaBlob as unknown as Blob);
-    const meta = pf.metadata();
-    let totalRows = 0;
-    for (let rg = 0; rg < meta.numRowGroups(); rg++) totalRows += meta.rowGroup(rg).numRows();
-
-    // Step 2+3: fetch each target column chunk using the correct byte offsets.
-    // For dict-encoded columns, fetch starts at dict_page_offset (before data pages).
-    // total_compressed_size covers the entire column (dict + data pages).
-    const chunks: ColChunk[] = [];
-
-    for (const target of META_TARGETS) {
-      const dotPath = target.path.join(".");
-      const colInfo = colInfoMap.get(dotPath);
-      if (!colInfo) {
-        console.warn("[buildGridFast] column not in footer:", dotPath);
-        continue;
-      }
-
-      // Start from dict page if present (comes before data pages in the file)
-      const fetchStart = colInfo.dictPageOffset > 0
-        ? Math.min(colInfo.dictPageOffset, colInfo.dataPageOffset)
-        : colInfo.dataPageOffset;
-      // data_page_offset within the fetched bytes (for mini Parquet footer)
-      const dataPageOffsetInChunk = colInfo.dataPageOffset - fetchStart;
-
-      const buf = await blobLike.slice(fetchStart, fetchStart + colInfo.compressedSize).arrayBuffer();
-
-      chunks.push({
-        path: target.path,
-        parquetType: target.parquetType,
-        codec: 6, // ZSTD
-        encodings: [0, 3, 8],
-        data: new Uint8Array(buf),
-        numValues: colInfo.numValues || totalRows,
-        uncompressedSize: colInfo.uncompressedSize,
-        dataPageOffsetInChunk,
-      });
-    }
-
-    if (chunks.length < 2) {
-      console.warn("[buildGridFast] not enough columns:", chunks.length, "targets:", META_TARGETS.length);
-      return null;
-    }
-
-    console.log("[buildGridFast] fetched", chunks.length, "columns,",
-      (chunks.reduce((s,c)=>s+c.data.length,0)/1024).toFixed(1), "KB total");
-
-    // Step 4+5: build mini Parquet file and decode with parquet-wasm readParquet()
-    const miniParquet = buildMiniParquet(chunks, totalRows);
-    const rawTable = readParquet(miniParquet);
+    // The spectra_metadata.parquet file is typically small (~1.5 MB for HR2MSI).
+    // Read it entirely and decode with parquet-wasm — no column projection needed.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buf = await (metaBlob as any).arrayBuffer() as ArrayBuffer;
+    const rawTable = readParquet(new Uint8Array(buf));
     const table = tableFromIPC(rawTable.intoIPCStream());
 
-    if (table.numRows === 0) return null;
+    const nRows = table.numRows;
+    if (nRows === 0) return null;
+    console.log("[buildGridFast] decoded", nRows, "rows from", (buf.byteLength/1024).toFixed(1), "KB metadata");
 
-    // Extract arrays from the decoded Arrow table via row iteration
-    const xArr: number[] = [];
-    const yArr: number[] = [];
-    const ticArr: number[] = [];
+    // Extract X, Y, TIC, m/z range via row iteration
+    const xArr: number[] = new Array(nRows);
+    const yArr: number[] = new Array(nRows);
+    const ticArr: number[] = new Array(nRows);
     let globalMinMz = Infinity, globalMaxMz = -Infinity;
 
-    for (let r = 0; r < table.numRows; r++) {
+    for (let r = 0; r < nRows; r++) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = table.get(r) as any;
       const scan = row?.scan;
       const spec = row?.spectrum;
-      xArr.push(Number(scan?.IMS_1000050_position_x ?? 0));
-      yArr.push(Number(scan?.IMS_1000051_position_y ?? 0));
-      ticArr.push(Number(spec?.MS_1000285_total_ion_current_unit_MS_1000131 ?? 0));
+      xArr[r] = Number(scan?.IMS_1000050_position_x ?? 0);
+      yArr[r] = Number(scan?.IMS_1000051_position_y ?? 0);
+      ticArr[r] = Number(spec?.MS_1000285_total_ion_current_unit_MS_1000131 ?? 0);
       const lo = Number(spec?.MS_1000528_lowest_observed_mz_unit_MS_1000040 ?? 0);
       const hi = Number(spec?.MS_1000527_highest_observed_mz_unit_MS_1000040 ?? 0);
       if (lo > 0 && lo < globalMinMz) globalMinMz = lo;
       if (hi > globalMaxMz) globalMaxMz = hi;
     }
 
-    const nRows = xArr.length;
     const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
     const spectrumIndices = Array.from({ length: nRows }, (_, i) => i);
-
     const grid = buildImagingGrid(coords, spectrumIndices, null, "promoted-columns");
     if (!grid) return null;
 
-    // Build TIC image
     const base = grid.coordinateBase ?? 1;
     const tic = new Float32Array(grid.width * grid.height);
     for (let i = 0; i < nRows; i++) {
@@ -324,20 +238,21 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     }
 
     const stats: FileStats = {
-      numSpectra: nRows,
-      numEntities: nRows,
+      numSpectra: nRows, numEntities: nRows,
       mzRange: Number.isFinite(globalMinMz) ? [globalMinMz, globalMaxMz] : null,
       msLevels: [1],
       representationCounts: { profile: 0, centroid: nRows },
     };
 
     activeGrid = grid;
+    console.log("[buildGridFast] grid", grid.width, "x", grid.height, "TIC ready");
     return { grid, stats, tic };
   } catch (e) {
     console.warn("[mzPeakWorker] buildGridFast failed:", e);
     return null;
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // Lazy full-reader init — triggered by first renderIonImage / selectSpectrum
