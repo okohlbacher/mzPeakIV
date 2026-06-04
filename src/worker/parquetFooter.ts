@@ -19,6 +19,9 @@ export interface ColInfo {
   compressedSize: number; // total compressed size (dict + data pages)
   uncompressedSize: number;
   numValues: number;
+  parquetType: number;  // Parquet Type enum: BOOLEAN=0, INT32=1, INT64=2, FLOAT=4, DOUBLE=5
+  codec: number;        // CompressionCodec enum: UNCOMPRESSED=0, SNAPPY=1, GZIP=2, ZSTD=6
+  encodings: number[];  // list of Encoding values actually present
 }
 
 // ---------------------------------------------------------------------------
@@ -102,14 +105,14 @@ class TR {
         for (let i = 0; i < n; i++) this.skipType(t);
         break;
       }
-      case 11: {                                      // MAP: different header format!
-        // Thrift compact MAP: 1 byte = (keyType<<4)|valType, then count (unsigned varint)
-        // Empty map is encoded as single 0x00 byte.
-        const mapHeader = this.byte();
-        if (mapHeader !== 0) {
-          const keyType = (mapHeader >> 4) & 0x0f;
-          const valType = mapHeader & 0x0f;
-          const count = this.uvarint();
+      case 11: {
+        // Thrift compact MAP: count (varint) FIRST, then (keyType<<4)|valType byte.
+        // If count == 0, the type byte is omitted (Apache Thrift compact spec §map).
+        const count = this.uvarint();
+        if (count > 0) {
+          const typeByte = this.byte();
+          const keyType = (typeByte >> 4) & 0x0f;
+          const valType = typeByte & 0x0f;
           for (let i = 0; i < count; i++) {
             this.skipType(keyType);
             this.skipType(valType);
@@ -236,6 +239,7 @@ function decodeColumnMetaData(r: TR, colInfos: Map<string, ColInfo> | null) {
   const info: Partial<ColInfo> = {
     dataPageOffset: 0, dictPageOffset: 0,
     compressedSize: 0, uncompressedSize: 0, numValues: 0,
+    parquetType: 5, codec: 0, encodings: [],
   };
   const path: string[] = [];
   let prevId = 0;
@@ -249,10 +253,15 @@ function decodeColumnMetaData(r: TR, colInfos: Map<string, ColInfo> | null) {
     else prevId = r.byte() | (r.byte() << 8);
 
     switch (prevId) {
+      case 1: info.parquetType = r.i32(); break;         // Type enum
       case 2: {
-        // encodings (list<Encoding>) — skip
+        // encodings (list<Encoding>) — read them
         const [t, n] = r.listHeader();
-        for (let i = 0; i < n; i++) r.skipType(t);
+        for (let i = 0; i < n; i++) {
+          const enc = r.i32();
+          (info.encodings ??= []).push(enc);
+          void t; // listHeader returns elemType but we iterate as i32 enums
+        }
         break;
       }
       case 3: {
@@ -261,12 +270,14 @@ function decodeColumnMetaData(r: TR, colInfos: Map<string, ColInfo> | null) {
         for (let i = 0; i < n; i++) path.push(r.str());
         break;
       }
-      case 5: info.numValues = r.i64(); break;           // num_values
-      case 6: info.uncompressedSize = r.i64(); break;   // total_uncompressed_size
-      case 7: info.compressedSize = r.i64(); break;     // total_compressed_size
-      case 8: r.i64(); break;                           // key_value_metadata — skip
-      case 9: info.dataPageOffset = r.i64(); break;     // data_page_offset ← THE KEY FIELD
-      case 10: info.dictPageOffset = r.i64(); break;    // dictionary_page_offset
+      case 4: info.codec = r.i32(); break;               // CompressionCodec enum
+      case 5: info.numValues = r.i64(); break;
+      case 6: info.uncompressedSize = r.i64(); break;
+      case 7: info.compressedSize = r.i64(); break;
+      case 8: r.skipType(type); break;                   // key_value_metadata: map<Encoding,i64> — skip correctly
+      case 9: info.dataPageOffset = r.i64(); break;      // data_page_offset
+      case 10: r.i64(); break;                           // index_page_offset — NOT dict, skip
+      case 11: info.dictPageOffset = r.i64(); break;     // dictionary_page_offset (field 11, not 10!)
       default: r.skipType(type); break;
     }
   }
@@ -280,6 +291,9 @@ function decodeColumnMetaData(r: TR, colInfos: Map<string, ColInfo> | null) {
       compressedSize: info.compressedSize ?? 0,
       uncompressedSize: info.uncompressedSize ?? 0,
       numValues: info.numValues ?? 0,
+      parquetType: info.parquetType ?? 5,
+      codec: info.codec ?? 0,
+      encodings: info.encodings ?? [],
     });
   }
 }

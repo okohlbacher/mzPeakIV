@@ -119,7 +119,7 @@ class W {
 // ---------------------------------------------------------------------------
 
 // Parquet type constants (values match the Parquet Thrift enum)
-export const PType  = { BOOLEAN: 0, INT32: 0, INT64: 2, INT96: 3, FLOAT: 4, DOUBLE: 5, BYTE_ARRAY: 6 };
+export const PType  = { BOOLEAN: 0, INT32: 1, INT64: 2, INT96: 3, FLOAT: 4, DOUBLE: 5, BYTE_ARRAY: 6 };
 export const Codec  = { UNCOMPRESSED: 0, SNAPPY: 1, GZIP: 2, BROTLI: 3, ZSTD: 6 };
 export const Enc    = { PLAIN: 0, PLAIN_DICTIONARY: 2, RLE: 3, BIT_PACKED: 4, RLE_DICTIONARY: 8 };
 const Rep    = { REQUIRED: 0, OPTIONAL: 1, REPEATED: 2 };
@@ -333,6 +333,12 @@ function writeColumnMetaData(w: W, col: ColChunk, _chunkOffset: number, dataPage
 
   // field 9: data_page_offset
   f = w.fh(f, 9, T.I64); w.i64(dataPageOffset);
+
+  // field 11: dictionary_page_offset — only when dict page precedes data pages
+  if (col.dataPageOffsetInChunk && col.dataPageOffsetInChunk > 0) {
+    // chunk starts at the dict page; data pages begin after dataPageOffsetInChunk bytes
+    f = w.fh(f, 11, T.I64); w.i64(_chunkOffset);  // dict page is at chunk start
+  }
 
   w.stop();
 }

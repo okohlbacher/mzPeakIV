@@ -260,11 +260,15 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       const dataPageOffsetInChunk = colInfo.dataPageOffset - fetchStart;
       const buf = await blobLike.slice(fetchStart, fetchStart + colInfo.compressedSize).arrayBuffer();
       dt(`  got ${buf.byteLength}B`);
+      // Use type/codec/encodings from footer — don't hardcode.
+      const enc = colInfo.encodings.length > 0
+        ? colInfo.encodings
+        : (colInfo.dictPageOffset > 0 ? [0, 3, 8] : [0, 3]);
       chunks.push({
-        path, parquetType: pathTypes[dotPath] ?? 5,
-        // dictPageOffset=0 → no dict page → PLAIN+RLE; >0 → include RLE_DICTIONARY.
-        codec: 6,
-        encodings: colInfo.dictPageOffset > 0 ? [0, 3, 8] : [0, 3],
+        path,
+        parquetType: colInfo.parquetType > 0 ? colInfo.parquetType : (pathTypes[dotPath] ?? 5),
+        codec: colInfo.codec,
+        encodings: enc,
         data: new Uint8Array(buf),
         numValues: colInfo.numValues || 0,
         uncompressedSize: colInfo.uncompressedSize,
@@ -308,7 +312,18 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
 
     const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
     const spectrumIndices = Array.from({ length: nRows }, (_, i) => i);
-    const grid = buildImagingGrid(coords, spectrumIndices, null, "promoted-columns");
+    // Read geometry from fileIndex.metadata.imaging (coordinate_base, pixel counts)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const imgMeta = (activeZipStorage?.fileIndex?.metadata?.imaging ?? {}) as any;
+    const geometry = imgMeta ? {
+      pixelCount: (imgMeta.pixel_count_x && imgMeta.pixel_count_y)
+        ? { x: imgMeta.pixel_count_x as number, y: imgMeta.pixel_count_y as number }
+        : null,
+      pixelSizeUm: null,
+      coordinateBase: (imgMeta.coordinate_base as number) ?? 1,
+      geometrySource: "discovery-block" as const,
+    } : null;
+    const grid = buildImagingGrid(coords, spectrumIndices, geometry, "promoted-columns");
     if (!grid) { dt("buildImagingGrid returned null"); return null; }
     dt(`grid ${grid.width}x${grid.height} — building TIC...`);
 
@@ -328,6 +343,7 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     };
 
     activeGrid = grid;
+    activeStats = stats;  // set so fast render path has access to representationCounts
     dt(`DONE ✓ grid=${grid.width}x${grid.height} tic.length=${tic.length} mzRange=[${globalMinMz.toFixed(1)},${globalMaxMz.toFixed(1)}]`);
     return { grid, stats, tic };
   } catch (e) {
@@ -674,19 +690,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
           const transferList: Transferable[] = [];
           if (ionImage) transferList.push(ionImage.buffer);
           sendTransfer({ type: "renderResult", ionImage, stats: ionImageStats, requestId }, transferList);
-          // Auto-compute TIC on first render for the overview canvas.
-          if (ionImage && !activeStats) {
-            computeIonImageFast(0, Infinity).then((tic) => {
-              if (tic && activeGrid) {
-                sendTransfer({ type: "loadResult", result: {
-                  manifest: activeZipStorage ? manifestFromStore(activeZipStorage) : [],
-                  fileMeta: null, stats: null,
-                  capabilities: { isImaging: true, layout: "point" as const, encodings: [], unsupported: [] },
-                  grid: activeGrid, tic, mixedRepresentationWarning: null,
-                }}, [tic.buffer]);
-              }
-            }).catch(() => {/* TIC is optional */});
-          }
+          // TIC is already sent via buildGridFast's loadResult — no recompute needed.
           break;
         }
 
