@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.3
 milestone_name: milestone
-status: Phase 4 planned — 6 plans in 4 waves; ready to execute
-stopped_at: Phase 04 planned
-last_updated: "2026-06-04T00:00:00.000Z"
-last_activity: 2026-06-04
+status: executing
+stopped_at: Phase 04 UI-SPEC approved
+last_updated: "2026-06-04T00:21:18.849Z"
+last_activity: 2026-06-04 -- Phase 04 execution started
 progress:
   total_phases: 5
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Open an imaging mzPeak file in a browser → pick an *m/z* → see a correct ion image → click a pixel → see its spectrum.
-**Current focus:** Phase 3 — TIC Image + Pixel→Spectrum Round-Trip
+**Current focus:** Phase 04 — ion-image-intensity-scaling
 
 ## Current Position
 
-Phase: 4
-Plan: Ready to execute (6 plans, 4 waves)
-Status: Planned
-Last activity: 2026-06-03
+Phase: 04 (ion-image-intensity-scaling) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 04
+Last activity: 2026-06-04 -- Phase 04 execution started
 
 Progress: [██████░░░░] 60%
 
