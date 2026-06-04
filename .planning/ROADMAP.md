@@ -97,7 +97,15 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
   4. The currently selected *m/z* ± tolerance window is visually marked on the clicked-pixel spectrum.
   5. Changing colormap or scale recolors the cached raster without re-querying the file.
 
-**Plans**: TBD
+**Plans**: 6 plans
+
+- [ ] 04-01-PLAN.md — ionImage.ts compute + ionImage.test.ts (ppmToDa, buildIonImage, computeIonImageStats)
+- [ ] 04-02-PLAN.md — rasterize.ts generalize + rasterize.test.ts (rasterizeImage, Inferno/Gray LUTs, log scaling)
+- [ ] 04-03-PLAN.md — store.ts Phase 4 slice + renderIonImage + setColormapSettings actions
+- [ ] 04-04-PLAN.md — SpectrumPanel.tsx SPEC-02 m/z band via uPlot hooks.draw
+- [ ] 04-05-PLAN.md — ImagingPanel.tsx controls row + ion-image canvas + stats line
+- [ ] 04-06-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
+
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
 
