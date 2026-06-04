@@ -65,6 +65,8 @@ function sendTransfer(message: WorkerResponse, transfer: Transferable[]): void {
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let activeZipStorage: ZipStorage<any> | null = null;
+/** URL of the currently loaded file — for direct HTTP range requests */
+let activeFileUrl: string | null = null;
 let activeReader: Reader | null = null;
 let activeStats: FileStats | null = null;
 let activeGrid: ImagingGrid | null = null;
@@ -192,17 +194,39 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; tic: Float32Array | null } | null> {
   if (!activeZipStorage) return null;
   try {
+    // Use direct HTTP fetch() to bypass zip.js/RemoteBlob for the column reads.
+    // RemoteBlob's HttpRangeReader may have issues in the Worker context;
+    // direct fetch() is more reliable and equally fast.
     const metaBlob = await activeZipStorage.spectrumMetadata();
     if (!metaBlob) return null;
 
-    // Strategy: parse the Parquet footer (~33 KB range request) to get exact
-    // byte offsets for the 5 needed leaf columns, fetch only those column chunks
-    // (~192 KB total), build a minimal valid Parquet file in memory, decode.
-    // This avoids reading the full file + its complex nested types (large_list<uint8>)
-    // that cause parquet-wasm to fail when reading the complete metadata Parquet.
-    const blobLike = metaBlob as unknown as {
-      size: number;
-      slice(s: number, e: number): { arrayBuffer(): Promise<ArrayBuffer> };
+    // metaBlob.start is the absolute byte offset of the Parquet data in the ZIP file
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parquetStart = (metaBlob as any).start as number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parquetSize = (metaBlob as any).size as number;
+
+    if (!activeFileUrl) {
+      console.warn("[buildGridFast] no file URL — cannot use direct fetch");
+      return null;
+    }
+
+    // Helper: fetch a byte range from the ZIP file and return as ArrayBuffer
+    const fetchRange = async (offset: number, size: number): Promise<ArrayBuffer> => {
+      const abs = parquetStart + offset;
+      const resp = await fetch(activeFileUrl!, {
+        headers: { Range: `bytes=${abs}-${abs + size - 1}` },
+      });
+      if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status} for range ${abs}-${abs+size-1}`);
+      return resp.arrayBuffer();
+    };
+
+    // Build a blob-like object using fetchRange for the footer parser
+    const blobLike = {
+      size: parquetSize,
+      slice: (s: number, e: number) => ({
+        arrayBuffer: () => fetchRange(s, e - s),
+      }),
     };
 
     const footerBytes = await readParquetFooter(blobLike);
@@ -306,7 +330,8 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     console.log("[buildGridFast] grid", grid.width, "x", grid.height, "TIC ready");
     return { grid, stats, tic };
   } catch (e) {
-    console.warn("[mzPeakWorker] buildGridFast failed:", e);
+    const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    send({ type: "error", class: "corrupt", message: `[buildGridFast] ${errMsg}` });
     return null;
   }
 }
@@ -578,6 +603,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       case "loadUrl": {
         // Reset ALL module-scope state before each new file load (Pitfall 5).
         activeZipStorage = null;
+        activeFileUrl = null;
         activeReader = null;
         activeStats = null;
         activeGrid = null;
@@ -585,6 +611,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
         // No Parquet data read here. Full reader init is deferred to first
         // renderIonImage / selectSpectrum call.
+        activeFileUrl = msg.url;
         activeZipStorage = await ZipStorage.fromUrl(msg.url);
         await runFastLoad(activeZipStorage);
         break;
@@ -600,6 +627,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // File objects cannot cross the Worker boundary (Pitfall 3 / Pattern 4).
         // The main thread transfers the ArrayBuffer; reconstruct a Blob here.
         const blob = new Blob([msg.bytes]);
+        activeFileUrl = null; // local file — no URL for direct HTTP reads
 
         // FAST PATH: BlobReader reads mzpeak_index.json only.
         activeZipStorage = await ZipStorage.fromBlob(blob);
