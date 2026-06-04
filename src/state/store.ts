@@ -1,23 +1,7 @@
 import { create } from "zustand";
 
-import { openUrl as readerOpenUrl, type Reader } from "../reader/openUrl";
-import { openFile as readerOpenFile } from "../reader/openFile";
-import {
-  fileMeta as readFileMeta,
-  manifest as readManifest,
-  spectrumMeta,
-} from "../reader/fileMeta";
-import { computeStats, computeCapabilities } from "../reader/stats";
-// selectSpectrum routes by representation via getSpectrumArraysFor; the legacy
-// try-order getSpectrumArrays export remains available for non-imaging callers.
-import { getSpectrumArraysFor } from "../reader/arrays";
-import { extractCoords, readGridGeometry } from "../reader/scanCoords";
-import { buildImagingGrid } from "../imaging/grid";
-import { buildTic } from "../compute/tic";
-import { buildIonImage, computeIonImageStats } from "../compute/ionImage";
 import { type Colormap } from "../ui/rasterize";
 import type { ImagingGrid } from "../imaging/types";
-import { UnsupportedEncodingError } from "../reader/errors";
 import type { ReaderErrorClass } from "../reader/errors";
 import type {
   Capabilities,
@@ -28,6 +12,12 @@ import type {
   SpectrumArrays,
   UnsupportedFinding,
 } from "../reader/types";
+import type {
+  WorkerRequest,
+  WorkerResponse,
+  LoadResult,
+  NonImagingResult,
+} from "../worker/protocol";
 
 /** Structured store error (R-03b). */
 export type StoreError = {
@@ -36,32 +26,7 @@ export type StoreError = {
   findings?: UnsupportedFinding[];
 };
 
-// Small await so the staged-progress transitions are observable in the UI rather
-// than collapsing into a single synchronous frame (LOAD-03).
-const yieldFrame = () =>
-  new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-/**
- * Classify a caught error into a structured StoreError (R-03b).
- * UnsupportedEncodingError → class: 'unsupported-encoding' with findings.
- * Anything else            → class: 'corrupt'.
- */
-function classifyError(err: unknown): StoreError {
-  if (err instanceof UnsupportedEncodingError) {
-    return {
-      class: "unsupported-encoding",
-      message: err.message,
-      findings: err.findings,
-    };
-  }
-  return {
-    class: "corrupt",
-    message: err instanceof Error ? err.message : String(err),
-  };
-}
-
 type State = {
-  reader: Reader | null;
   fileMeta: FileMeta | null;
   manifest: ManifestEntry[];
   stats: FileStats | null;
@@ -82,19 +47,20 @@ type State = {
   colormap: Colormap;
   scale: "linear" | "log";
   percentile: number;
+  /** Phase 5: true while a Worker renderIonImage request is in flight (D-02/D-03). */
+  isRendering: boolean;
 };
 
 type Actions = {
-  openUrl: (url: string) => Promise<void>;
+  openUrl: (url: string) => void;
   openFile: (file: File) => Promise<void>;
-  selectSpectrum: (index: number) => Promise<void>;
+  selectSpectrum: (index: number) => void;
   // Phase 4 actions (IMAGE-02/IMAGE-03).
-  renderIonImage: (mz: number, tolDa: number) => Promise<void>;
+  renderIonImage: (mz: number, tolDa: number) => void;
   setColormapSettings: (colormap: Colormap, scale: "linear" | "log", percentile: number) => void;
 };
 
 const initialState: State = {
-  reader: null,
   fileMeta: null,
   manifest: [],
   stats: null,
@@ -113,195 +79,163 @@ const initialState: State = {
   colormap: "viridis",
   scale: "linear",
   percentile: 0.99,
+  // Phase 5 default.
+  isRendering: false,
 };
 
-/** Shared load logic — runs the staged transitions after a reader is obtained. */
-async function runLoad(
-  reader: Reader,
-  set: (partial: Partial<State & Actions>) => void,
-  get: () => State & Actions,
-) {
-  set({ stage: "manifest" });
-  await yieldFrame();
-  const manifest = readManifest(reader);
+// ---------------------------------------------------------------------------
+// Worker instantiation — module scope (Pitfall 5: NEVER inside an action body)
+// The same Worker instance handles all load and render requests for the page's
+// lifetime. Multiple calls to openUrl/openFile reuse the same Worker thread.
+// ---------------------------------------------------------------------------
+const worker = new Worker(
+  new URL("../worker/mzPeakWorker.ts", import.meta.url),
+  { type: "module" },
+);
 
-  set({ stage: "metadata" });
-  await yieldFrame();
-  const fileMeta = readFileMeta(reader);
-  const stats = computeStats(reader, manifest);
-  const capabilities = computeCapabilities(reader, manifest);
-
-  // Eager 'grid' stage (D-05): reconstruct the imaging pixel grid only when this
-  // is an imaging file. A non-imaging file leaves grid: null and proceeds to
-  // ready with NO error (D-06) — non-imaging is a valid, expected outcome.
-  set({ stage: "grid" });
-  await yieldFrame();
-  let grid: ImagingGrid | null = null;
-  if (capabilities.isImaging) {
-    const cr = extractCoords(reader);
-    const geometry = readGridGeometry(reader);
-    grid = cr
-      ? buildImagingGrid(cr.coords, cr.spectrumIndices, geometry, cr.strategy)
-      : null;
-    // Surface a named error when an imaging file's grid could not be built —
-    // a silent grid:null on an imaging file is a failure, not a valid state (D-06
-    // only applies to non-imaging files). The error is 'corrupt' class (best fit
-    // until a dedicated 'grid-build-failed' class is added in Phase 5).
-    if (grid === null) {
-      set({
-        reader,
-        manifest,
-        fileMeta,
-        stats,
-        capabilities,
-        grid: null,
-        stage: "error",
-        error: {
-          class: "corrupt",
-          message:
-            "Imaging file detected but spatial pixel grid could not be reconstructed. " +
-            "The coordinate columns may be empty or malformed.",
-        },
-        selectedIndex: null,
-        selectedSpectrum: null,
-      });
-      return;
-    }
-  }
-
-  // Eager 'tic' stage (D-02): compute the TIC raster the moment the grid exists,
-  // via the SAME extractXIC(null, null, useProfile) primitive Phase 4 will reuse
-  // for m/z-windowed ion images. Only runs for imaging files (grid !== null) —
-  // a non-imaging file skips TIC entirely → tic: null, no error (D-06).
-  let tic: Float32Array | null = null;
-  let mixedRepresentationWarning: string | null = null;
-  if (grid) {
-    set({ stage: "tic" });
-    await yieldFrame();
-
-    // D-08 source selection: majority-source rule. Use profile when profile
-    // spectra are at least as numerous as centroid (profile is the spec's
-    // primary and the tiebreaker when counts are equal). A minority of profile
-    // spectra (e.g. 1 profile + 999 centroid) correctly routes to centroid.
-    const { profile, centroid } = stats.representationCounts;
-    const useProfile = profile >= centroid;
-    const mixed = profile > 0 && centroid > 0;
-    if (mixed) {
-      const usedSource = useProfile ? "profile" : "centroid";
-      const usedCount = useProfile ? profile : centroid;
-      mixedRepresentationWarning =
-        `Mixed profile/centroid spectra — TIC computed from ${usedSource} ` +
-        `(${usedCount} of ${profile + centroid}); per-pixel spectra route individually`;
-    }
-
-    try {
-      // extractXIC(null, null, useProfile) → one XICPoint per spectrum carrying
-      // its full intensity array; buildTic sums each onto its grid cell (IMAGE-01).
-      const xic = await reader.extractXIC(null, null, useProfile);
-      // A null XIC is NOT an error (D-06): it yields tic: null, which the UI
-      // renders as "Could not compute TIC for this file" — not an ErrorBanner.
-      tic = xic ? buildTic(xic, grid) : null;
-    } catch (err) {
-      // A genuine throw during TIC compute IS an error — route it loudly rather
-      // than crashing the whole load silently.
-      set({ stage: "error", error: classifyError(err) });
-      return;
-    }
-  }
-
-  set({
-    reader,
-    manifest,
-    fileMeta,
-    stats,
-    capabilities,
-    grid,
-    tic,
-    mixedRepresentationWarning,
-    stage: "ready",
-    error: null,
-    selectedIndex: null,
-    selectedSpectrum: null,
-  });
-
-  // Auto-select the first spectrum so the happy path is one click.
-  if (stats.numSpectra > 0) {
-    await get().selectSpectrum(0);
-  }
-}
+// Generation counter for stale renderResult responses (Pattern 5 / T-05-05).
+// Incremented on each renderIonImage call; Worker echoes requestId in the
+// response; mismatched IDs are silently discarded on the main thread.
+let currentRequestId = 0;
 
 export const useStore = create<State & Actions>((set, get) => ({
   ...initialState,
 
-  async openUrl(url: string) {
+  openUrl(url: string) {
     set({ ...initialState, stage: "zip-index" });
-    try {
-      await yieldFrame();
-      const reader = await readerOpenUrl(url);
-      await runLoad(reader, set, get);
-    } catch (err) {
-      set({ stage: "error", error: classifyError(err) });
-    }
+    worker.postMessage({ type: "loadUrl", url } satisfies WorkerRequest);
   },
 
   async openFile(file: File) {
     set({ ...initialState, stage: "zip-index" });
-    try {
-      await yieldFrame();
-      const reader = await readerOpenFile(file);
-      await runLoad(reader, set, get);
-    } catch (err) {
-      set({ stage: "error", error: classifyError(err) });
-    }
+    const buffer = await file.arrayBuffer();
+    // Transfer ownership of the ArrayBuffer to the Worker (Pattern 4 / Pitfall 3).
+    // File objects cannot cross the Worker boundary reliably — convert to ArrayBuffer
+    // on the main thread first, then transfer the buffer zero-copy.
+    worker.postMessage(
+      { type: "loadFile", bytes: buffer, name: file.name } satisfies WorkerRequest,
+      [buffer],
+    );
   },
 
-  async selectSpectrum(index: number) {
-    const reader = get().reader;
-    if (!reader) return;
-    try {
-      // Route the read by MS:1000525 representation (DATA-03): one action serves
-      // both the numeric index input and (plan 03-03) the pixel-click.
-      const meta = spectrumMeta(reader, index);
-      const selectedSpectrum = await getSpectrumArraysFor(
-        reader,
-        index,
-        meta.representation,
-      );
-      set({ selectedIndex: index, selectedSpectrum });
-    } catch (err) {
-      set({ stage: "error", error: classifyError(err) });
-    }
+  selectSpectrum(index: number) {
+    // Optimistic UI update — actual spectrum data arrives via 'spectrumResult'.
+    // The Worker holds the active Reader; it performs the Parquet read.
+    set({ selectedIndex: index });
+    worker.postMessage({ type: "selectSpectrum", index } satisfies WorkerRequest);
   },
 
   // Phase 4: render an m/z-windowed ion image (IMAGE-02).
-  // This is the ONLY action that calls extractXIC with a non-null mzRange.
+  // This action now dispatches to the Worker instead of running inline.
   // setColormapSettings MUST NOT call extractXIC or reader (D-02/SC-5).
-  async renderIonImage(mz: number, tolDa: number) {
-    const { reader, grid, stats } = get();
-    if (!reader || !grid || !stats) return;
+  renderIonImage(mz: number, tolDa: number) {
+    const { grid, stats } = get();
+    if (!grid || !stats) return;
     // V5 input validation (ASVS L1): reject non-finite, non-positive, or negative-window inputs.
-    // This is defense-in-depth — the button handler in ImagingPanel validates independently.
+    // This is defense-in-depth — the Worker also validates (T-05-02).
     if (!Number.isFinite(mz) || mz <= 0 || !Number.isFinite(tolDa) || tolDa <= 0) return;
     if (mz - tolDa < 0) return; // guard: negative mz start is non-physical (T-04-05)
-    try {
-      // D-08 majority rule: verbatim from store.ts:167-168 — do not re-derive.
-      const { profile, centroid } = stats.representationCounts;
-      const useProfile = profile >= centroid;
-      // Span1D shape {start, end} — NOT [min, max] tuple (Pitfall 3 / T-04-07).
-      const mzRange = { start: mz - tolDa, end: mz + tolDa };
-      const xic = await reader.extractXIC(null, mzRange, useProfile);
-      const ionImage = xic ? buildIonImage(xic, grid) : null;
-      const ionImageStats = ionImage ? computeIonImageStats(ionImage, grid) : null;
-      set({ ionImage, ionImageStats, mzWindow: ionImage ? { mz, tolDa } : null });
-    } catch (err) {
-      set({ stage: "error", error: classifyError(err) });
-    }
+    const rid = ++currentRequestId;
+    // Optimistic mzWindow update for spectrum band highlighting (SPEC-02).
+    // The ion image itself arrives via 'renderResult' when the Worker is done.
+    set({ isRendering: true, mzWindow: { mz, tolDa } });
+    worker.postMessage(
+      { type: "renderIonImage", mz, tolDa, requestId: rid } satisfies WorkerRequest,
+    );
   },
 
   // Phase 4: update colormap/scale/percentile settings (IMAGE-03).
-  // Pure state mutation — no file I/O, no extractXIC. The render effect in
+  // Pure state mutation — no file I/O, no Worker message. The render effect in
   // ImagingPanel re-rasterizes the cached ionImage on colormap/scale change (D-02/SC-5).
   setColormapSettings(colormap: Colormap, scale: "linear" | "log", percentile: number) {
     set({ colormap, scale, percentile });
   },
 }));
+
+// ---------------------------------------------------------------------------
+// Worker onmessage handler — single source of truth for all state updates
+// driven by Worker responses. Must be wired AFTER useStore is created so
+// useStore.setState() is available.
+//
+// Zustand exposes setState on the store object itself — calling useStore.setState
+// from outside create() is the idiomatic pattern for external event sources.
+// ---------------------------------------------------------------------------
+worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
+  const msg = e.data;
+  switch (msg.type) {
+    case "progress":
+      useStore.setState({ stage: msg.stage });
+      break;
+
+    case "loadResult": {
+      // Spread LoadResult fields into state; store no longer holds reader handle.
+      // Worker is the sole owner of the live Reader after Plan 05-03.
+      const r = msg.result as LoadResult;
+      useStore.setState({
+        manifest: r.manifest,
+        fileMeta: r.fileMeta,
+        stats: r.stats,
+        capabilities: r.capabilities,
+        grid: r.grid ?? null,
+        tic: r.tic ?? null,
+        mixedRepresentationWarning: r.mixedRepresentationWarning,
+        stage: "ready",
+        error: null,
+        selectedIndex: null,
+        selectedSpectrum: null,
+      });
+      break;
+    }
+
+    case "noImaging": {
+      // D-04/D-06: valid non-imaging file — not an error. Set 'no-imaging' stage
+      // so the UI shows the informational notice instead of ImagingPanel.
+      const r = msg.result as NonImagingResult;
+      useStore.setState({
+        manifest: r.manifest,
+        fileMeta: r.fileMeta,
+        stats: r.stats,
+        capabilities: r.capabilities,
+        grid: null,
+        tic: null,
+        stage: "no-imaging",
+        error: null,
+        selectedIndex: null,
+        selectedSpectrum: null,
+      });
+      break;
+    }
+
+    case "renderResult":
+      // Stale response guard (Pattern 5 / T-05-05): if the Worker echoes a
+      // requestId that no longer matches the latest request, discard silently.
+      if (msg.requestId !== currentRequestId) break;
+      useStore.setState({
+        ionImage: msg.ionImage ?? null,
+        ionImageStats: msg.stats ?? null,
+        isRendering: false,
+      });
+      break;
+
+    case "spectrumResult":
+      useStore.setState({
+        selectedIndex: msg.spectrum.index,
+        selectedSpectrum: msg.spectrum,
+      });
+      break;
+
+    case "error":
+      // CRITICAL (Pitfall 7 / T-05-06): isRendering MUST be cleared on error,
+      // or the 'Show Ion Image' button is permanently disabled after any Worker error.
+      useStore.setState({
+        stage: "error",
+        error: {
+          class: msg.class,
+          message: msg.message,
+          findings: msg.findings,
+        },
+        isRendering: false,
+      });
+      break;
+  }
+};
