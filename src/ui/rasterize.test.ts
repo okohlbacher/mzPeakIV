@@ -275,18 +275,38 @@ describe("rasterizeImage — percentile param", () => {
     // Under p=0.99 clipMax=99, so value=91 gives norm=91/99≈0.919 — not max brightness.
     expect(rgbaAt(out99, 90)).not.toEqual([...top, 255]);
   });
+
+  it("percentileClip n=2 p=0.99 returns the higher value, not the minimum", () => {
+    // 1×2 dense grid: values=[1,2]. With Math.ceil(0.99*2)-1 = ceil(1.98)-1 = 2-1 = 1,
+    // present[1]=2 → clipMax=2. Cell value=2: norm=2/2=1.0 → viridis(1).
+    // Cell value=1: norm=1/2=0.5 → viridis(0.5). The two cells must be distinguishable.
+    const grid = makeGrid(2, 1);
+    const values = new Float32Array([1, 2]);
+    const out = rasterizeImage(values, grid, {
+      colormap: "viridis",
+      percentile: 0.99,
+      logScale: false,
+    });
+    // The two cells must differ (higher-value cell is brighter)
+    expect(rgbaAt(out, 1)).not.toEqual(rgbaAt(out, 0));
+    // The max-value cell (index 1, value=2) renders at LUT top under p=0.99 with n=2
+    expect(rgbaAt(out, 1)).toEqual([...viridis(1), 255]);
+  });
 });
 
 // ── Block 3: inferno colormap ─────────────────────────────────────────────────
 
 describe("rasterizeImage — inferno colormap", () => {
-  it("monotonic luminance: inferno(0) < inferno(0.5) < inferno(1.0)", () => {
+  it("monotonic luminance: inferno increases from 0 through 0.25, 0.5, 0.75, 0.875 to 1.0", () => {
     const lum = (norm: number) => {
       const [r, g, b] = inferno(norm);
       return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     };
-    expect(lum(0)).toBeLessThan(lum(0.5));
-    expect(lum(0.5)).toBeLessThan(lum(1.0));
+    expect(lum(0)).toBeLessThan(lum(0.25));
+    expect(lum(0.25)).toBeLessThan(lum(0.5));
+    expect(lum(0.5)).toBeLessThan(lum(0.75));
+    expect(lum(0.75)).toBeLessThan(lum(0.875));
+    expect(lum(0.875)).toBeLessThan(lum(1.0));
   });
 
   it("inferno LUT returns integer RGB in [0,255] at extremes and midpoint", () => {
