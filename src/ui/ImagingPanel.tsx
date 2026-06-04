@@ -84,6 +84,7 @@ export function ImagingPanel() {
   const percentile = useStore((s) => s.percentile);
   const renderIonImage = useStore((s) => s.renderIonImage);
   const setColormapSettings = useStore((s) => s.setColormapSettings);
+  const isRendering = useStore((s) => s.isRendering);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ionCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -341,15 +342,17 @@ export function ImagingPanel() {
         </select>
         <button
           onClick={handleRenderIonImage}
+          disabled={isRendering || !(Number.isFinite(Number(mzInput)) && Number(mzInput) > 0 && Number.isFinite(Number(tolInput)) && Number(tolInput) > 0)}
           style={{
             background: "#1565c0",
             color: "#fff",
             border: "none",
             padding: "0.25rem 0.5rem",
-            cursor: "pointer",
+            cursor: isRendering ? "wait" : "pointer",
+            opacity: isRendering ? 0.7 : 1,
           }}
         >
-          Show Ion Image
+          {isRendering ? "Computing…" : "Show Ion Image"}
         </button>
         <select
           value={colormap}

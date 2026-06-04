@@ -87,7 +87,12 @@ End your review with EXACTLY ONE verdict line of the form:
 
 --- DIFF (${PHASE} since ${SHA}) ---
 EOF
-      ( cd "$ROOT" && git diff "${SHA}" -- . ':(exclude)vendor' )
+      DIFF="$(cd "$ROOT" && git diff "${SHA}" -- . ':(exclude)vendor')"
+      if [ -z "$DIFF" ]; then
+        echo "ERROR: diff from ${SHA} is empty — ensure phase work is committed before running round2" >&2
+        exit 1
+      fi
+      printf '%s\n' "$DIFF"
       ;;
     *)
       echo "ERROR: round must be 'round1' or 'round2', got '$ROUND'" >&2
