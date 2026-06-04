@@ -8,7 +8,8 @@
  * Plan binding: 03-01 Task 2 behavior block, Tests 1–6.
  */
 import { describe, it, expect } from "vitest";
-import { rasterizeTic, viridis } from "./rasterize";
+import { rasterizeTic, viridis, rasterizeImage, inferno } from "./rasterize";
+import type { Colormap, RasterizeOpts } from "./rasterize";
 import type { ImagingGrid } from "../imaging/types";
 
 // ── Fixture helper ────────────────────────────────────────────────────────────
@@ -167,5 +168,202 @@ describe("viridis — LUT bounds", () => {
         expect(Number.isInteger(c)).toBe(true);
       }
     }
+  });
+});
+
+// ── IMAGE-03 tests — rasterizeImage ──────────────────────────────────────────
+// These tests extend the Phase 3 suite without touching existing describes.
+
+// ── Block 1: log scaling ──────────────────────────────────────────────────────
+
+describe("rasterizeImage — log scaling", () => {
+  it("raw=0 with logScale:true → norm=0 (no NaN, no negative in output)", () => {
+    // 1×1 dense grid, value 0. With log scale raw=0 → Math.log1p(0)===0 → norm 0.
+    const grid = makeGrid(1, 1);
+    const values = new Float32Array([0]);
+    const out = rasterizeImage(values, grid, {
+      colormap: "viridis",
+      percentile: 0.99,
+      logScale: true,
+    });
+    const [r, g, b, a] = rgbaAt(out, 0);
+    for (const c of [r, g, b, a]) {
+      expect(Number.isNaN(c)).toBe(false);
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(c).toBeLessThanOrEqual(255);
+    }
+    // norm=0 → viridis(0) (not sentinel since cell is present)
+    const [er, eg, eb] = viridis(0);
+    expect([r, g, b]).toEqual([er, eg, eb]);
+    expect(a).toBe(255);
+  });
+
+  it("raw>0 with logScale:true → pixel is brighter than raw=0 pixel", () => {
+    // 1×3 dense grid: cell 0=0 (dim), cell 1=50 (mid, becomes clipMax at p=0.99 of [0,50,100]),
+    // cell 2=100 (above clipMax → clipped to max brightness).
+    // With log scale: norm(0)=0, norm(100)=min(log1p(100)/log1p(50),1)=1.0 (bright).
+    // p=0.99 on 3 present values [0,50,100]: idx=floor(0.99*2)=1 → clipMax=50.
+    const grid = makeGrid(1, 3);
+    const values = new Float32Array([0, 50, 100]);
+    const out = rasterizeImage(values, grid, {
+      colormap: "viridis",
+      percentile: 0.99,
+      logScale: true,
+    });
+    const [r0, g0, b0] = rgbaAt(out, 0);
+    const [r2, g2, b2] = rgbaAt(out, 2);
+    const lum0 = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
+    const lum2 = 0.2126 * r2 + 0.7152 * g2 + 0.0722 * b2;
+    expect(lum2).toBeGreaterThan(lum0);
+  });
+
+  it("no pixel in a dense grid has NaN in RGBA channels (logScale:true)", () => {
+    const grid = makeGrid(3, 2);
+    const values = new Float32Array([10, 20, 30, 5, 50, 100]);
+    const out = rasterizeImage(values, grid, {
+      colormap: "viridis",
+      percentile: 0.99,
+      logScale: true,
+    });
+    for (let k = 0; k < 6; k++) {
+      const [r, g, b, a] = rgbaAt(out, k);
+      for (const c of [r, g, b, a]) {
+        expect(Number.isNaN(c)).toBe(false);
+      }
+    }
+  });
+});
+
+// ── Block 2: percentile param ─────────────────────────────────────────────────
+
+describe("rasterizeImage — percentile param", () => {
+  it("p=0.90 clips at a lower ceiling than p=0.99, causing more pixels to reach max brightness", () => {
+    // 1×4 dense grid with values [10, 50, 90, 100].
+    // 90th percentile of [10,50,90,100] → idx = floor(0.90*3)=2 → value 90.
+    // 99th percentile of [10,50,90,100] → idx = floor(0.99*3)=2 → value 90.
+    // Use a wider spread to see the difference: [10, 50, 90, 1000].
+    // 90th: idx=floor(0.90*3)=2 → clipMax=90; 99th: idx=floor(0.99*3)=2 → clipMax=90.
+    // With 5 values [10,20,30,40,100]: 90th=idx=floor(0.90*4)=3→40; 99th=idx=floor(0.99*4)=3→40.
+    // Use [1,2,3,4,5,6,7,8,9,100] (10 values): 90th=idx=floor(0.90*9)=8→9; 99th=idx=floor(0.99*9)=8→9.
+    // Use [1,2,...,10, 100] (11 values): 90th=idx=floor(0.90*10)=9→10; 99th=idx=floor(0.99*10)=9→10.
+    // Use 20 values [1..19,100]: 90th=idx=floor(0.90*19)=17→18; 99th=idx=floor(0.99*19)=18→19.
+    // With clipMax=18 (p=0.90): value=100 → norm=min(100/18,1)=1.0 → max brightness.
+    // With clipMax=19 (p=0.99): value=100 → norm=min(100/19,1)=1.0 → also max brightness (same here).
+    // Use 100 values [1..99,1000]: 90th=idx=floor(0.90*99)=89→90; 99th=idx=floor(0.99*99)=98→99.
+    // clipMax90=90; clipMax99=99. Value=91 → norm90=min(91/90,1)=1.0; norm99=min(91/99,1)=0.919.
+    // So under p=0.90, cell with value=91 renders at max; under p=0.99, same cell renders below max.
+    const n = 100;
+    const totalGrid = makeGrid(n, 1);
+    const values = new Float32Array(n);
+    for (let i = 0; i < n - 1; i++) values[i] = i + 1; // 1..99
+    values[n - 1] = 1000; // one outlier
+
+    const out90 = rasterizeImage(values, totalGrid, {
+      colormap: "viridis",
+      percentile: 0.90,
+      logScale: false,
+    });
+    const out99 = rasterizeImage(values, totalGrid, {
+      colormap: "viridis",
+      percentile: 0.99,
+      logScale: false,
+    });
+
+    // Cell at index 90 (value=91) should be at LUT top under p=0.90, below top under p=0.99.
+    const top = viridis(1);
+    expect(rgbaAt(out90, 90)).toEqual([...top, 255]); // clipped to max under p=0.90
+    // Under p=0.99 clipMax=99, so value=91 gives norm=91/99≈0.919 — not max brightness.
+    expect(rgbaAt(out99, 90)).not.toEqual([...top, 255]);
+  });
+});
+
+// ── Block 3: inferno colormap ─────────────────────────────────────────────────
+
+describe("rasterizeImage — inferno colormap", () => {
+  it("monotonic luminance: inferno(0) < inferno(0.5) < inferno(1.0)", () => {
+    const lum = (norm: number) => {
+      const [r, g, b] = inferno(norm);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    expect(lum(0)).toBeLessThan(lum(0.5));
+    expect(lum(0.5)).toBeLessThan(lum(1.0));
+  });
+
+  it("inferno LUT returns integer RGB in [0,255] at extremes and midpoint", () => {
+    for (const n of [0, 0.5, 1]) {
+      const [r, g, b] = inferno(n);
+      for (const c of [r, g, b]) {
+        expect(c).toBeGreaterThanOrEqual(0);
+        expect(c).toBeLessThanOrEqual(255);
+        expect(Number.isInteger(c)).toBe(true);
+      }
+    }
+  });
+});
+
+// ── Block 4: gray colormap ────────────────────────────────────────────────────
+
+describe("rasterizeImage — gray colormap", () => {
+  it("R === G === B for every present pixel", () => {
+    // 1×3 dense grid with varying values.
+    const grid = makeGrid(1, 3);
+    const values = new Float32Array([0, 50, 100]);
+    const out = rasterizeImage(values, grid, {
+      colormap: "gray",
+      percentile: 0.99,
+      logScale: false,
+    });
+    for (let k = 0; k < 3; k++) {
+      const [r, g, b] = rgbaAt(out, k);
+      expect(r).toBe(g);
+      expect(g).toBe(b);
+    }
+  });
+
+  it("gray colormap: zero-value present cell renders as R=G=B=0 (darkest gray)", () => {
+    const grid = makeGrid(1, 1);
+    const values = new Float32Array([0]);
+    const out = rasterizeImage(values, grid, {
+      colormap: "gray",
+      percentile: 0.99,
+      logScale: false,
+    });
+    const [r, g, b, a] = rgbaAt(out, 0);
+    expect(r).toBe(0);
+    expect(g).toBe(0);
+    expect(b).toBe(0);
+    expect(a).toBe(255);
+  });
+});
+
+// ── Block 5: sentinel preserved across colormaps ──────────────────────────────
+
+describe("rasterizeImage — sentinel preserved across all colormaps", () => {
+  for (const colormap of ["viridis", "inferno", "gray"] as Colormap[]) {
+    it(`absent cell renders as SENTINEL [0x1a,0x1a,0x1a,255] for colormap="${colormap}"`, () => {
+      // 1×2 grid: cell 0 absent, cell 1 present.
+      const grid = makeGrid(1, 2, [0]);
+      const values = new Float32Array([0, 50]);
+      const opts: RasterizeOpts = { colormap, percentile: 0.99, logScale: false };
+      const out = rasterizeImage(values, grid, opts);
+      expect(rgbaAt(out, 0)).toEqual([0x1a, 0x1a, 0x1a, 255]);
+    });
+  }
+});
+
+// ── Block 6: rasterizeTic regression wrapper ──────────────────────────────────
+
+describe("rasterizeTic — regression wrapper (IMAGE-03)", () => {
+  it("rasterizeTic(values, grid) === rasterizeImage(values, grid, {colormap:'viridis', percentile:0.99, logScale:false})", () => {
+    const grid = makeGrid(2, 2);
+    const values = new Float32Array([10, 20, 30, 40]);
+    const fromWrapper = rasterizeTic(values, grid);
+    const fromGeneral = rasterizeImage(values, grid, {
+      colormap: "viridis",
+      percentile: 0.99,
+      logScale: false,
+    });
+    // Byte-for-byte identical output.
+    expect(Array.from(fromWrapper)).toEqual(Array.from(fromGeneral));
   });
 });
