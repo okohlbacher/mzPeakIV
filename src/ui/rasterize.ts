@@ -53,7 +53,8 @@ const VIRIDIS_STOPS: ReadonlyArray<readonly [number, number, number]> = [
 
 /**
  * Standard matplotlib inferno LUT at 9 evenly-spaced stops (0, 0.125, …, 1).
- * [ASSUMED] cosmetic anchor values — chosen to match matplotlib inferno palette.
+ * Stop[7] corrected from initial assumed value [252,255,164] to match matplotlib
+ * inferno t=0.875 (gold/amber [249,201,52]); stop[8] [252,255,164] unchanged.
  */
 const INFERNO_STOPS: ReadonlyArray<readonly [number, number, number]> = [
   [0, 0, 4], // 0.000  near-black (distinct from sentinel #1a1a1a)
@@ -63,7 +64,7 @@ const INFERNO_STOPS: ReadonlyArray<readonly [number, number, number]> = [
   [212, 72, 66], // 0.500  orange-red
   [245, 125, 21], // 0.625  orange
   [250, 193, 39], // 0.750  gold
-  [252, 255, 164], // 0.875  pale yellow
+  [249, 201, 52], // 0.875  gold/amber
   [252, 255, 164], // 1.000  pale yellow (top — 9th stop, 8 segments)
 ];
 
@@ -124,7 +125,7 @@ function percentileClip(values: Float32Array, presenceMask: Uint8Array, p: numbe
   }
   if (present.length === 0) return 0;
   present.sort((a, b) => a - b);
-  const idx = Math.min(present.length - 1, Math.floor(p * (present.length - 1)));
+  const idx = Math.min(present.length - 1, Math.max(0, Math.ceil(p * present.length) - 1));
   const ceil = present[idx];
   return Number.isFinite(ceil) && ceil > 0 ? ceil : 0;
 }
