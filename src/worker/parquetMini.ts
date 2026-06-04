@@ -134,9 +134,17 @@ export interface ColChunk {
   parquetType: number;           // PType.*
   codec: number;                 // Codec.*
   encodings: number[];           // Enc.*
-  data: Uint8Array;              // raw compressed Parquet page bytes
+  data: Uint8Array;              // raw compressed Parquet page bytes (from dict page start)
   numValues: number;
   uncompressedSize: number;
+  /**
+   * Byte offset of the first DATA page within `data`.
+   * When dict pages are present, `data` starts at the dict page. The data pages
+   * begin at `dataPageOffsetInChunk` bytes into `data`. This value is written
+   * as `data_page_offset` in the mini Parquet footer so parquet-wasm can locate
+   * the data pages correctly. 0 means data starts at the beginning of `data`.
+   */
+  dataPageOffsetInChunk?: number;
 }
 
 /**
@@ -147,14 +155,18 @@ export function buildMiniParquet(cols: ColChunk[], numRows: number): Uint8Array 
   const MAGIC = Uint8Array.from([80, 65, 82, 49]); // "PAR1"
 
   // Column chunks start immediately after the 4-byte leading magic.
+  // `offsets[i]` = byte position of col[i].data in the mini file.
+  // `dataPageOffsets[i]` = position of the FIRST DATA PAGE for col[i] within mini file.
   const offsets: number[] = [];
+  const dataPageOffsets: number[] = [];
   let pos = 4;
   for (const col of cols) {
     offsets.push(pos);
+    dataPageOffsets.push(pos + (col.dataPageOffsetInChunk ?? 0));
     pos += col.data.length;
   }
 
-  const footer = encodeFooter(cols, offsets, numRows);
+  const footer = encodeFooter(cols, offsets, dataPageOffsets, numRows);
 
   // Assemble: PAR1 + column data + footer + footer_len_LE4 + PAR1
   const total = 4 + cols.reduce((s, c) => s + c.data.length, 0) + footer.length + 4 + 4;
@@ -175,7 +187,7 @@ export function buildMiniParquet(cols: ColChunk[], numRows: number): Uint8Array 
 // Footer (Thrift compact FileMetaData)
 // ---------------------------------------------------------------------------
 
-function encodeFooter(cols: ColChunk[], offsets: number[], numRows: number): Uint8Array {
+function encodeFooter(cols: ColChunk[], offsets: number[], dataPageOffsets: number[], numRows: number): Uint8Array {
   // Build flat schema list:
   // Root schema element (required by Parquet) → parent structs → leaf columns
   const parents: string[] = [];
@@ -236,7 +248,7 @@ function encodeFooter(cols: ColChunk[], offsets: number[], numRows: number): Uin
   fid = w.fh(fid, 4, T.LIST);
   {
     w.list(T.STRUCT, 1);
-    writeRowGroup(w, cols, offsets, numRows);
+    writeRowGroup(w, cols, offsets, dataPageOffsets, numRows);
   }
 
   w.stop(); // end FileMetaData
@@ -258,14 +270,14 @@ function writeSchemaElement(
   w.stop();
 }
 
-function writeRowGroup(w: W, cols: ColChunk[], offsets: number[], numRows: number) {
+function writeRowGroup(w: W, cols: ColChunk[], offsets: number[], dataPageOffsets: number[], numRows: number) {
   let f = 0;
 
   // field 1: columns (list<ColumnChunk>)
   f = w.fh(f, 1, T.LIST);
   w.list(T.STRUCT, cols.length);
   for (let i = 0; i < cols.length; i++) {
-    writeColumnChunk(w, cols[i], offsets[i]);
+    writeColumnChunk(w, cols[i], offsets[i], dataPageOffsets[i]);
   }
 
   // field 2: total_byte_size
@@ -278,20 +290,20 @@ function writeRowGroup(w: W, cols: ColChunk[], offsets: number[], numRows: numbe
   w.stop();
 }
 
-function writeColumnChunk(w: W, col: ColChunk, offset: number) {
+function writeColumnChunk(w: W, col: ColChunk, offset: number, dataPageOffset: number) {
   let f = 0;
 
-  // field 2: file_offset
+  // field 2: file_offset (offset to ColumnMetaData — same as data start for inline)
   f = w.fh(f, 2, T.I64); w.i64(offset);
 
   // field 3: meta_data (ColumnMetaData struct — inline, NOT length-prefixed)
   f = w.fh(f, 3, T.STRUCT);
-  writeColumnMetaData(w, col, offset);
+  writeColumnMetaData(w, col, offset, dataPageOffset);
 
   w.stop();
 }
 
-function writeColumnMetaData(w: W, col: ColChunk, dataPageOffset: number) {
+function writeColumnMetaData(w: W, col: ColChunk, _chunkOffset: number, dataPageOffset: number) {
   let f = 0;
 
   // field 1: type

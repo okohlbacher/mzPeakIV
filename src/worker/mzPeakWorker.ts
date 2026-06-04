@@ -13,6 +13,7 @@ import { ZipStorage } from "mzpeakts";
 import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
 import { buildMiniParquet, type ColChunk } from "./parquetMini";
+import { decodeFooter, readParquetFooter } from "./parquetFooter";
 import { openReaderFromStore, type Reader } from "../reader/openUrl";
 import {
   fileMeta as readFileMeta,
@@ -221,54 +222,63 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     const metaBlob = await activeZipStorage.spectrumMetadata();
     if (!metaBlob) return null;
 
-    // Step 1: read footer only (~33 KB range request at end of 553 MB file)
+    // Step 1: parse the raw Parquet footer to get data_page_offset for each column.
+    // parquet-wasm's fileOffset() returns ColumnChunk.file_offset which is 0 (inline metadata)
+    // NOT data_page_offset — we need our own Thrift decoder for the correct value.
+    const blobLike = metaBlob as unknown as {
+      size: number;
+      slice(s: number, e: number): { arrayBuffer(): Promise<ArrayBuffer> };
+    };
+    const footerBytes = await readParquetFooter(blobLike);
+    const colInfoMap = decodeFooter(footerBytes);
+
+    // Get numRows from parquet-wasm (reliable)
     const pf = await ParquetFile.fromFile(metaBlob as unknown as Blob);
     const meta = pf.metadata();
-
-    // All data is in a single row group (confirmed for HR2MSI + similar files)
-    // If multiple row groups exist, sum rows from all.
-    const nRG = meta.numRowGroups();
     let totalRows = 0;
-    for (let rg = 0; rg < nRG; rg++) totalRows += meta.rowGroup(rg).numRows();
+    for (let rg = 0; rg < meta.numRowGroups(); rg++) totalRows += meta.rowGroup(rg).numRows();
 
-    // Step 2: find target column chunk offsets via metadata API
-    // We look at row group 0 (if data is split across multiple RGs, each would need fetching)
-    const rg0 = meta.rowGroup(0);
+    // Step 2+3: fetch each target column chunk using the correct byte offsets.
+    // For dict-encoded columns, fetch starts at dict_page_offset (before data pages).
+    // total_compressed_size covers the entire column (dict + data pages).
     const chunks: ColChunk[] = [];
 
     for (const target of META_TARGETS) {
       const dotPath = target.path.join(".");
-      for (let c = 0; c < rg0.numColumns(); c++) {
-        const col = rg0.column(c);
-        if (col.columnPath().join(".") !== dotPath) continue;
-
-        // Step 3: fetch this column chunk as raw bytes
-        // fileOffset() = ColumnChunk.file_offset = data_page_offset for single-file Parquet
-        const offset = Number(col.fileOffset());
-        const size = col.compressedSize();
-        const slice = (metaBlob as unknown as { slice(start: number, end: number): unknown }).slice(offset, offset + size);
-        // RemoteBlob.slice returns a new RemoteBlob; call arrayBuffer() to fetch
-        const buf = await (slice as { arrayBuffer(): Promise<ArrayBuffer> }).arrayBuffer();
-
-        const uncompressed = col.uncompressedSize();
-
-        chunks.push({
-          path: target.path,
-          parquetType: target.parquetType,
-          codec: 6, // ZSTD (confirmed by Python analysis)
-          encodings: [0, 3, 8], // PLAIN, RLE, RLE_DICTIONARY
-          data: new Uint8Array(buf),
-          numValues: rg0.numRows(),
-          uncompressedSize: typeof uncompressed === 'bigint' ? Number(uncompressed) : uncompressed,
-        });
-        break;
+      const colInfo = colInfoMap.get(dotPath);
+      if (!colInfo) {
+        console.warn("[buildGridFast] column not in footer:", dotPath);
+        continue;
       }
+
+      // Start from dict page if present (comes before data pages in the file)
+      const fetchStart = colInfo.dictPageOffset > 0
+        ? Math.min(colInfo.dictPageOffset, colInfo.dataPageOffset)
+        : colInfo.dataPageOffset;
+      // data_page_offset within the fetched bytes (for mini Parquet footer)
+      const dataPageOffsetInChunk = colInfo.dataPageOffset - fetchStart;
+
+      const buf = await blobLike.slice(fetchStart, fetchStart + colInfo.compressedSize).arrayBuffer();
+
+      chunks.push({
+        path: target.path,
+        parquetType: target.parquetType,
+        codec: 6, // ZSTD
+        encodings: [0, 3, 8],
+        data: new Uint8Array(buf),
+        numValues: colInfo.numValues || totalRows,
+        uncompressedSize: colInfo.uncompressedSize,
+        dataPageOffsetInChunk,
+      });
     }
 
     if (chunks.length < 2) {
-      console.warn("[buildGridFast] could not find coordinate columns in metadata");
+      console.warn("[buildGridFast] not enough columns:", chunks.length, "targets:", META_TARGETS.length);
       return null;
     }
+
+    console.log("[buildGridFast] fetched", chunks.length, "columns,",
+      (chunks.reduce((s,c)=>s+c.data.length,0)/1024).toFixed(1), "KB total");
 
     // Step 4+5: build mini Parquet file and decode with parquet-wasm readParquet()
     const miniParquet = buildMiniParquet(chunks, totalRows);
