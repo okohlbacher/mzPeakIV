@@ -11,7 +11,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 - [x] **Phase 1: Reader Foundation + Open-and-Inspect** - Open a `.mzpeak` (local/URL), read manifest + metadata, view any single spectrum; capability-detect and fail loud on unsupported encodings. (completed 2026-06-03)
 - [x] **Phase 2: Imaging Grid Reconstruction (THE GATE)** - Reconstruct the spatial pixel grid from per-spectrum coordinates via a swappable strategy; gated on a real operator imaging file. (completed 2026-06-03)
 - [x] **Phase 3: TIC Image + Pixel→Spectrum Round-Trip** - Render the default TIC spatial overview and complete the file→image→click→spectrum Core Value loop. (completed 2026-06-03)
-- [ ] **Phase 4: Ion Image + Intensity Scaling** - Render a per-*m/z* ion image with Da/ppm tolerance, colormaps, and log/percentile scaling so images are never falsely blank.
+- [x] **Phase 4: Ion Image + Intensity Scaling** - Render a per-*m/z* ion image with Da/ppm tolerance, colormaps, and log/percentile scaling so images are never falsely blank. (completed 2026-06-04)
 - [ ] **Phase 5: Worker Offload, Robustness & Static Deploy** - Offload compute to a Web Worker, finalize the error taxonomy, fail loud on unsupported encodings/non-imaging, and ship to GitHub Pages.
 
 ## Phase Details
@@ -104,7 +104,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 - [x] 04-03-PLAN.md — store.ts Phase 4 slice + renderIonImage + setColormapSettings actions
 - [x] 04-04-PLAN.md — SpectrumPanel.tsx SPEC-02 m/z band via uPlot hooks.draw
 - [x] 04-05-PLAN.md — ImagingPanel.tsx controls row + ion-image canvas + stats line
-- [ ] 04-06-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
+- [x] 04-06-PLAN.md — PROC-01 Codex gate (round1 plan + round2 diff)
 
 **Review:** Codex round1 (plan) + round2 (diff) per PROC-01
 **UI hint**: yes
@@ -134,7 +134,7 @@ This roadmap is derived from the research build-order (ARCHITECTURE.md dependenc
 | 1. Reader Foundation + Open-and-Inspect | 4/4 | Complete    | 2026-06-03 |
 | 2. Imaging Grid Reconstruction (THE GATE) | 4/4 | Complete    | 2026-06-03 |
 | 3. TIC Image + Pixel→Spectrum Round-Trip | 4/4 | Complete    | 2026-06-03 |
-| 4. Ion Image + Intensity Scaling | 5/6 | In Progress|  |
+| 4. Ion Image + Intensity Scaling | 6/6 | Complete   | 2026-06-04 |
 | 5. Worker Offload, Robustness & Static Deploy | 0/? | Not started | - |
 
 ## Coverage
