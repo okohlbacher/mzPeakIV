@@ -434,7 +434,7 @@ setColormapSettings(colormap: Colormap, scale: "linear" | "log", percentile: num
 
 **Note:** All structural/behavioral claims (reader windowing, `Span1D` shape, uPlot hook API, existing pure-fn signatures, C2 orientation) are **VERIFIED** by reading the vendored/installed source — only the three cosmetic/wording items above are assumptions.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Is a small windowed-XIC e2e fixture available?**
    - What we know: Phase 3 used synthetic fixtures for unit tests; a real `.mzpeak` (PXD001283) is the validation input but may not be in `test/data/`.
