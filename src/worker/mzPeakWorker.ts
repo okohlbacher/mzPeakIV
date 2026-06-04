@@ -215,12 +215,11 @@ async function runLoadInWorker(reader: Reader): Promise<void> {
   activeStats = stats;
   activeGrid = grid;
 
-  // Build the transfer list: transfer tic.buffer zero-copy (Pattern 3 / Pitfall 2).
-  // CRITICAL: always [float32Array.buffer] not [float32Array].
-  // Also transfer presenceMask.buffer from grid (ImagingGrid note in protocol.ts).
   const transferList: Transferable[] = [];
   if (tic) transferList.push(tic.buffer);
-  if (grid!.presenceMask) transferList.push(grid!.presenceMask.buffer);
+  // NOTE: presenceMask.buffer is NOT transferred — activeGrid retains a valid
+  // buffer for subsequent renderIonImage calls. The Uint8Array is small enough
+  // (~35 KB for PXD001283 260x134) that structured-clone copy cost is negligible.
 
   sendTransfer(
     {
@@ -237,7 +236,7 @@ async function runLoadInWorker(reader: Reader): Promise<void> {
     },
     transferList,
   );
-  // WARNING: tic and presenceMask are now detached — do not use after postMessage.
+  // WARNING: tic.buffer is now detached — do not use tic after postMessage.
 
   // Auto-select first spectrum (verbatim from store.ts lines 228-230).
   if (stats.numSpectra > 0) {

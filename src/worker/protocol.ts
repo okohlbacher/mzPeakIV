@@ -80,10 +80,10 @@ export type WorkerResponse =
  * - grid: ImagingGrid — SERIALIZATION NOTE: ImagingGrid contains a
  *   Map<number, number> (coordToSpectrumIndex) and a Uint8Array (presenceMask).
  *   Both survive structured clone (Maps are cloneable; TypedArrays are
- *   transferable). The Map is deep-cloned (not zero-copy); Uint8Array.buffer
- *   can be transferred. Plan 02 (Worker implementation) should add
- *   presenceMask.buffer to the transfer list to avoid a copy of that array.
- *   The Map clone is unavoidable without a custom serialization scheme.
+ *   cloneable). The Map is deep-cloned (not zero-copy); the presenceMask
+ *   Uint8Array is structured-cloned (small, ~35 KB). presenceMask.buffer is
+ *   intentionally NOT transferred — the Worker retains a valid presenceMask
+ *   for subsequent renderIonImage calls.
  * - tic: Float32Array — transfer tic.buffer zero-copy (Pitfall 2 / Pattern 3)
  * - mixedRepresentationWarning: optional human-readable diagnostic string
  */
