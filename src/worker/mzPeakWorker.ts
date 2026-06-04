@@ -445,6 +445,69 @@ async function initReaderAndGrid(): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Fast XIC — compute ion image directly from spectra_data.parquet
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute an XIC ion image from spectra_data.parquet WITHOUT reading the
+ * 553 MB spectra_metadata.parquet or initializing the full MzPeakReader.
+ *
+ * spectra_data.parquet is only 208 KB compressed (39 row groups, ~5 KB each).
+ * Each row: point.spectrum_index, point.mz, point.intensity.
+ *
+ * Algorithm:
+ *   For each row group (processed one at a time, ~20 MB uncompressed):
+ *     - Filter rows where mzStart ≤ mz ≤ mzEnd
+ *     - Accumulate intensity per spectrum_index into a Float32Array
+ *   Map spectrum_index → grid cell via activeGrid.coordToSpectrumIndex
+ *   Return the ion image Float32Array.
+ *
+ * Total data read: 208 KB (vs 553 MB for full reader init). ~10-30× faster.
+ */
+async function computeIonImageFast(
+  mzStart: number,
+  mzEnd: number,
+): Promise<Float32Array | null> {
+  if (!activeZipStorage || !activeGrid) return null;
+
+  const dataBlob = await activeZipStorage.spectrumData();
+  if (!dataBlob) return null;
+
+  const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+  const nRG = pf.metadata().numRowGroups();
+
+  // Accumulate intensity sums per spectrum_index across all row groups.
+  // Use a Map for sparse accumulation (most spectra may have 0 signal in range).
+  const intensitySum = new Map<number, number>();
+
+  for (let rg = 0; rg < nRG; rg++) {
+    const rawTable = await pf.read({ rowGroups: [rg] });
+    const table = tableFromIPC(rawTable.intoIPCStream());
+
+    for (let r = 0; r < table.numRows; r++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row = table.get(r) as any;
+      const pt = row?.point ?? row;
+      const mz = Number(pt?.mz ?? 0);
+      if (mz < mzStart || mz > mzEnd) continue;
+      const si = Number(pt?.spectrum_index ?? pt?.spectrumIndex ?? 0);
+      const inten = Number(pt?.intensity ?? 0);
+      intensitySum.set(si, (intensitySum.get(si) ?? 0) + inten);
+    }
+  }
+
+  // coordToSpectrumIndex maps gridKey → spectrumIndex.
+  // We have intensitySum keyed by spectrumIndex → map into grid image.
+  const img = new Float32Array(activeGrid.width * activeGrid.height);
+  for (const [gridKey, spectrumIdx] of activeGrid.coordToSpectrumIndex) {
+    const val = intensitySum.get(spectrumIdx) ?? 0;
+    if (gridKey >= 0 && gridKey < img.length) img[gridKey] = val;
+  }
+
+  return img;
+}
+
+// ---------------------------------------------------------------------------
 // Fast spectrum read — row-group skipping in spectra_data.parquet
 // ---------------------------------------------------------------------------
 
@@ -608,14 +671,27 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
 
       case "renderIonImage": {
-        // V5 input validation guard (ASVS L1) — defense-in-depth.
         const { mz, tolDa, requestId } = msg;
         if (!Number.isFinite(mz) || mz <= 0 || !Number.isFinite(tolDa) || tolDa <= 0) return;
         if (mz - tolDa < 0) return;
 
-        // LAZY INIT: the full MzPeakReader is needed for extractXIC.
-        // activeGrid may already be set by computeFastOverview (fast column projection),
-        // but activeReader is still null until the first renderIonImage.
+        const mzStart = mz - tolDa;
+        const mzEnd = mz + tolDa;
+
+        // FAST PATH: grid is already built from computeFastOverview — compute
+        // XIC directly from spectra_data.parquet (208 KB, ~20 MB/RG in WASM)
+        // without downloading the 553 MB spectra_metadata.parquet.
+        if (activeGrid && !activeReader) {
+          const ionImage = await computeIonImageFast(mzStart, mzEnd);
+          const ionImageStats = ionImage ? computeIonImageStats(ionImage, activeGrid) : null;
+          const transferList: Transferable[] = [];
+          if (ionImage) transferList.push(ionImage.buffer);
+          sendTransfer({ type: "renderResult", ionImage, stats: ionImageStats, requestId }, transferList);
+          break;
+        }
+
+        // SLOW PATH: full reader not yet initialized — init from scratch.
+        // (Only reached if computeFastOverview failed or grid not built yet.)
         if (!activeReader) {
           const ok = await initReaderAndGrid();
           if (!ok) return;
@@ -623,23 +699,16 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
 
         if (!activeReader || !activeGrid || !activeStats) return;
 
-        // D-08 majority rule.
         const { profile, centroid } = activeStats.representationCounts;
         const useProfile = profile >= centroid;
-
-        // Span1D shape {start, end} — NOT [min, max] tuple (T-04-07).
-        const mzRange = { start: mz - tolDa, end: mz + tolDa };
+        const mzRange = { start: mzStart, end: mzEnd };
         const xic = await activeReader.extractXIC(null, mzRange, useProfile);
         const ionImage = xic ? buildIonImage(xic, activeGrid) : null;
         const ionImageStats = ionImage ? computeIonImageStats(ionImage, activeGrid) : null;
 
         const transferList: Transferable[] = [];
         if (ionImage) transferList.push(ionImage.buffer);
-
-        sendTransfer(
-          { type: "renderResult", ionImage, stats: ionImageStats, requestId },
-          transferList,
-        );
+        sendTransfer({ type: "renderResult", ionImage, stats: ionImageStats, requestId }, transferList);
         break;
       }
 
