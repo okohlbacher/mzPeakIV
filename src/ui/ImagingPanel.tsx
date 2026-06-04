@@ -79,16 +79,11 @@ export function ImagingPanel() {
   // Phase 4 store subscriptions (IMAGE-02/IMAGE-03).
   const ionImage = useStore((s) => s.ionImage);
   const ionImageStats = useStore((s) => s.ionImageStats);
-  const mzWindow = useStore((s) => s.mzWindow);
   const colormap = useStore((s) => s.colormap);
   const scale = useStore((s) => s.scale);
   const percentile = useStore((s) => s.percentile);
   const renderIonImage = useStore((s) => s.renderIonImage);
   const setColormapSettings = useStore((s) => s.setColormapSettings);
-
-  // Suppress unused warning — mzWindow is read by SpectrumPanel for SPEC-02 band;
-  // ImagingPanel subscribes so re-renders are consistent when the window changes.
-  void mzWindow;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ionCanvasRef = useRef<HTMLCanvasElement | null>(null);

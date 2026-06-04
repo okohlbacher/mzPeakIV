@@ -292,7 +292,7 @@ export const useStore = create<State & Actions>((set, get) => ({
       const xic = await reader.extractXIC(null, mzRange, useProfile);
       const ionImage = xic ? buildIonImage(xic, grid) : null;
       const ionImageStats = ionImage ? computeIonImageStats(ionImage, grid) : null;
-      set({ ionImage, ionImageStats, mzWindow: { mz, tolDa } });
+      set({ ionImage, ionImageStats, mzWindow: ionImage ? { mz, tolDa } : null });
     } catch (err) {
       set({ stage: "error", error: classifyError(err) });
     }
