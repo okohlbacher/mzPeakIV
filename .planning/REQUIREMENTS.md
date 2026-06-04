@@ -45,7 +45,7 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 
 ### Errors & Robustness (UX)
 
-- [ ] **UX-01**: App distinguishes and clearly communicates the three failure classes: "not an imaging file", "unsupported encoding/feature", and "corrupt/unreadable file".
+- [x] **UX-01**: App distinguishes and clearly communicates the three failure classes: "not an imaging file", "unsupported encoding/feature", and "corrupt/unreadable file".
 
 ## v2 / Deferred
 
@@ -87,4 +87,4 @@ Core Value: **Open an imaging mzPeak file in a browser → pick an *m/z* → see
 | SPEC-02 | Phase 3 | Complete |
 | IMAGE-02 | Phase 4 | Complete |
 | IMAGE-03 | Phase 4 | Complete |
-| UX-01 | Phase 5 | Pending |
+| UX-01 | Phase 5 | Complete |
