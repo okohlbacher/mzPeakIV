@@ -81,4 +81,6 @@ export type LoadStage =
   | "grid"
   | "tic" // Phase 3 TIC compute stage (D-02)
   | "ready"
+  // D-06: valid non-imaging file — successful read, no spatial coords.
+  | "no-imaging"
   | "error";

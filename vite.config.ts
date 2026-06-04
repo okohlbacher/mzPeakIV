@@ -36,4 +36,10 @@ export default defineConfig({
     // Never inline the wasm — keep it a hashed asset for caching.
     assetsInlineLimit: 0,
   },
+  // CRITICAL: repeat wasm+topLevelAwait for Worker bundles — omitting this causes
+  // production builds to fail with "ESM integration proposal for Wasm is not supported".
+  // Leave format at default (iife) for Firefox compatibility (RESEARCH.md §Anti-Patterns).
+  worker: {
+    plugins: () => [wasm(), topLevelAwait()],
+  },
 });
