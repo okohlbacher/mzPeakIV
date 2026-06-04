@@ -217,18 +217,21 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
     case "noImaging": {
       // D-04/D-06: valid non-imaging file — not an error. Set 'no-imaging' stage
       // so the UI shows the informational notice instead of ImagingPanel.
+      // Merge: the second noImaging message (from computeFastOverview) adds stats
+      // without resetting the manifest/capabilities set by the first message.
       const r = msg.result as NonImagingResult;
+      const prevNI = useStore.getState();
       useStore.setState({
-        manifest: r.manifest,
-        fileMeta: r.fileMeta,
-        stats: r.stats,
-        capabilities: r.capabilities,
+        manifest: r.manifest ?? prevNI.manifest,
+        fileMeta: r.fileMeta ?? prevNI.fileMeta,
+        stats: r.stats ?? prevNI.stats,
+        capabilities: r.capabilities ?? prevNI.capabilities,
         grid: null,
         tic: null,
         stage: "no-imaging",
         error: null,
-        selectedIndex: null,
-        selectedSpectrum: null,
+        selectedIndex: prevNI.selectedIndex,
+        selectedSpectrum: prevNI.selectedSpectrum,
       });
       break;
     }
