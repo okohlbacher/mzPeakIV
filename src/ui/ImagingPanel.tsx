@@ -12,7 +12,6 @@ import type { View } from "./viewTypes";
 import {
   rasterizeTic,
   rasterizeImage,
-  rasterizeBasePeakMap,
   rasterizeMultiChannel,
   type Colormap,
 } from "./rasterize";
@@ -105,13 +104,9 @@ function filenameStem(run: unknown): string {
 export function ImagingPanel({
   view,
   setView,
-  overviewMode,
-  setOverviewMode,
 }: {
   view: View;
   setView: (v: View) => void;
-  overviewMode: "tic" | "basepeak";
-  setOverviewMode: (m: "tic" | "basepeak") => void;
 }) {
   const grid = useStore((s) => s.grid);
   const tic = useStore((s) => s.tic);
@@ -130,7 +125,6 @@ export function ImagingPanel({
   const setColormapSettings = useStore((s) => s.setColormapSettings);
   const isRendering = useStore((s) => s.isRendering);
 
-  const basePeakMz = useStore((s) => s.basePeakMz);
   const stats = useStore((s) => s.stats);
   const fileMeta = useStore((s) => s.fileMeta);
 
@@ -154,14 +148,13 @@ export function ImagingPanel({
   const roiIndices = useStore((s) => s.roiIndices);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const bpCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mcCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blendCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Blend view: per-layer opacity (0–1) for the TIC / ion / base-peak overlay.
-  const [blendOpacity, setBlendOpacity] = useState<{ tic: number; ion: number; basepeak: number }>(
-    { tic: 1, ion: 0.6, basepeak: 0 },
+  // Blend view: per-layer opacity (0–1) for the TIC / ion / RGB overlay.
+  const [blendOpacity, setBlendOpacity] = useState<{ tic: number; ion: number; rgb: number }>(
+    { tic: 1, ion: 0.6, rgb: 0 },
   );
 
   // Store the last rasterized ion image RGBA for re-blit during overlays.
@@ -227,16 +220,15 @@ export function ImagingPanel({
     canvas.height = grid.height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const rgba = rasterizeTic(tic, grid);
+    const rgba = rasterizeTic(tic, grid, colormap, scale === "log");
     ticRgbaRef.current = rgba;
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-    // view + overviewMode deps: the TIC canvas only mounts when the overview
-    // view is active AND overviewMode==="tic". Switching base-peak↔TIC, or
-    // leaving the overview view and returning, remounts a blank canvas; without
-    // these deps the paint effect would not re-run (tic/grid unchanged).
-  }, [tic, grid, view, overviewMode]);
+    // view dep: the TIC canvas mounts only when the overview view is active;
+    // returning to it remounts a blank canvas, so re-run on view change.
+    // colormap/scale: the overview TIC honors the global colormap + scale (UAT-r3).
+  }, [tic, grid, view, colormap, scale]);
 
   // Selection-ring pass (runs AFTER the paint pass): re-blit, then stroke a 1px
   // contrast ring on the selected cell. Keyed on [selectedIndex, tic, grid].
@@ -246,7 +238,7 @@ export function ImagingPanel({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     // putImageData overwrites the composite, so re-blit before stroking the ring.
-    const rgba = rasterizeTic(tic, grid);
+    const rgba = rasterizeTic(tic, grid, colormap, scale === "log");
     ticRgbaRef.current = rgba;
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
@@ -265,26 +257,8 @@ export function ImagingPanel({
     ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
-    // view + overviewMode: re-blit on remount (same mount-after-data reason).
-  }, [selectedIndex, tic, grid, view, overviewMode]);
-
-  // Base-peak m/z overview paint — Option C false-color map.
-  useEffect(() => {
-    const canvas = bpCanvasRef.current;
-    if (!canvas || !grid || !basePeakMz) return;
-    const mzMin = stats?.mzRange?.[0] ?? 0;
-    const mzMax = stats?.mzRange?.[1] ?? 1000;
-    canvas.width = grid.width;
-    canvas.height = grid.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const rgba = rasterizeBasePeakMap(basePeakMz, grid, mzMin, mzMax);
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(rgba);
-    ctx.putImageData(img, 0, 0);
-    // view + overviewMode: the base-peak canvas mounts only when active; repaint
-    // on remount (switching TIC↔base-peak or returning to the overview view).
-  }, [basePeakMz, grid, stats, view, overviewMode]);
+    // view: re-blit on remount (same mount-after-data reason).
+  }, [selectedIndex, tic, grid, view, colormap, scale]);
 
   // Phase 4 — ion image PAINT effect: rasterize the ion image with chosen colormap/scale/percentile.
   // BL-01/04/07: also keyed on [ticNorm, smoothSigma, histogramMode].
@@ -367,8 +341,8 @@ export function ImagingPanel({
     // view dependency: same mount-after-data issue as the ion canvas above.
   }, [multiChannel, grid, tic, ticNorm, view]);
 
-  // Blend canvas paint — alpha-over the TIC / ion / base-peak layers (bottom →
-  // top) by their slider opacities onto the dark stage colour.
+  // Blend canvas paint — alpha-over the TIC / ion / RGB layers (bottom → top)
+  // by their slider opacities onto the dark stage colour.
   useEffect(() => {
     if (view !== "blend") return;
     const canvas = blendCanvasRef.current;
@@ -386,12 +360,14 @@ export function ImagingPanel({
       out[i * 4 + 2] = 22; // --ink, the dark stage
       out[i * 4 + 3] = 255;
     }
-    const mzMin = stats?.mzRange?.[0] ?? 0;
-    const mzMax = stats?.mzRange?.[1] ?? 1000;
     const layers: Array<[Uint8ClampedArray, number]> = [];
-    if (basePeakMz && blendOpacity.basepeak > 0)
-      layers.push([rasterizeBasePeakMap(basePeakMz, grid, mzMin, mzMax), blendOpacity.basepeak]);
-    if (tic && blendOpacity.tic > 0) layers.push([rasterizeTic(tic, grid), blendOpacity.tic]);
+    if (tic && blendOpacity.tic > 0)
+      layers.push([rasterizeTic(tic, grid, colormap, scale === "log"), blendOpacity.tic]);
+    if (multiChannel?.images && blendOpacity.rgb > 0)
+      layers.push([
+        rasterizeMultiChannel(multiChannel.images, grid, tic ?? null, ticNorm),
+        blendOpacity.rgb,
+      ]);
     if (ionImage && blendOpacity.ion > 0)
       layers.push([
         rasterizeImage(ionImage, grid, {
@@ -423,7 +399,7 @@ export function ImagingPanel({
     blendOpacity,
     tic,
     ionImage,
-    basePeakMz,
+    multiChannel,
     grid,
     stats,
     colormap,
@@ -489,14 +465,14 @@ export function ImagingPanel({
   const displaySizeRef = useRef(displaySize);
   displaySizeRef.current = displaySize;
 
-  // Reset zoom + scroll when switching tabs/overview mode.
+  // Reset zoom + scroll when switching tabs.
   useEffect(() => {
     setZoom(1);
     if (stageRef.current) {
       stageRef.current.scrollLeft = 0;
       stageRef.current.scrollTop = 0;
     }
-  }, [view, overviewMode]);
+  }, [view]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -552,8 +528,6 @@ export function ImagingPanel({
       return { text: `${xy} — no data`, muted: true };
     if (view === "ion" && ionImage)
       return { text: `${xy} · intensity: ${formatCompact(ionImage[hit.key])}`, muted: false };
-    if (view === "overview" && overviewMode === "basepeak" && basePeakMz)
-      return { text: `${xy} · base-peak m/z: ${basePeakMz[hit.key].toFixed(2)}`, muted: false };
     if (view === "overview" && tic)
       return { text: `${xy} · TIC: ${formatCompact(tic[hit.key])}`, muted: false };
     return { text: xy, muted: false };
@@ -738,22 +712,16 @@ export function ImagingPanel({
 
   const canExportTiff = (ionImage !== null || (multiChannel?.images && multiChannel.images.some(Boolean))) && grid !== null;
 
-  // Legend tick labels for the active view.
-  const bpLow = stats?.mzRange ? String(Math.round(stats.mzRange[0])) : "lo";
-  const bpHigh = stats?.mzRange ? String(Math.round(stats.mzRange[1])) : "hi";
-  // Colormap selector applies ONLY to the ion image (rasterizeImage). The TIC
-  // and base-peak overviews use their own fixed palettes (rasterizeTic /
-  // rasterizeBasePeakMap ignore the store colormap), so the control would be
-  // inert there — hide it on overview (and multi, which is fixed R/G/B).
-  const showColormapCtl = view === "ion";
+  // Colormap selector applies to the ion image AND the overview TIC (both go
+  // through rasterizeImage/rasterizeTic, which honor the store colormap + scale).
+  // Hidden on multi (fixed R/G/B) and blend (composites its own layers).
+  const showColormapCtl = view === "ion" || view === "overview";
   // Single hover readout for all views (onImgMove tailors the text per view).
   const activeReadout = readout;
-  const ticHasImage = view === "overview" && overviewMode === "tic" && tic !== null && grid !== null;
-  const bpHasImage = view === "overview" && overviewMode === "basepeak" && basePeakMz !== null && grid !== null;
+  const ticHasImage = view === "overview" && tic !== null && grid !== null;
   const ionHasImage = view === "ion" && ionImage !== null && grid !== null;
-  const showLegend = ticHasImage || bpHasImage || ionHasImage;
-  const legendColormap: "viridis" | "inferno" | "gray" | "basepeak" =
-    overviewMode === "basepeak" && view === "overview" ? "basepeak" : colormap;
+  const showLegend = ticHasImage || ionHasImage;
+  const legendColormap: "viridis" | "inferno" | "gray" = colormap;
 
   return (
     <>
@@ -771,23 +739,6 @@ export function ImagingPanel({
           ]}
         />
         <div className="toolbar__sep" />
-
-        {view === "overview" && (
-          <SegmentedControl
-            size="sm"
-            ariaLabel="Overview mode"
-            value={overviewMode}
-            onChange={(v) => setOverviewMode(v as "tic" | "basepeak")}
-            options={
-              basePeakMz
-                ? [
-                    { value: "tic", label: "TIC" },
-                    { value: "basepeak", label: "Base-peak m/z" },
-                  ]
-                : [{ value: "tic", label: "TIC" }]
-            }
-          />
-        )}
 
         {view === "ion" && (
           <div className="toolbar__group">
@@ -860,7 +811,7 @@ export function ImagingPanel({
             {([
               ["tic", "TIC", tic !== null],
               ["ion", "Ion", ionImage !== null],
-              ["basepeak", "Base-peak", basePeakMz !== null],
+              ["rgb", "RGB", multiChannel?.images != null],
             ] as const).map(([key, label, available]) => (
               <span key={key} className="blend-row" title={available ? "" : "no data for this layer"}>
                 <span className="toolbar__lbl">{label}</span>
@@ -940,7 +891,6 @@ export function ImagingPanel({
 
         {/* Overview · TIC */}
         {view === "overview" &&
-          overviewMode === "tic" &&
           (tic === null ? (
             <div data-testid="tic-unavailable" className="stage__empty">
               TIC not yet available
@@ -959,27 +909,6 @@ export function ImagingPanel({
               />
               {roiOverlay}
             </div>
-          ))}
-
-        {/* Overview · Base-peak m/z */}
-        {view === "overview" &&
-          overviewMode === "basepeak" &&
-          (basePeakMz ? (
-            <div className="imgframe">
-              <canvas
-                ref={bpCanvasRef}
-                className="cross"
-                data-testid="basepeak-canvas"
-                onMouseDown={onImgDown}
-                onMouseMove={onImgMove}
-                onMouseUp={onImgUp}
-                onMouseLeave={onImgLeave}
-                style={{ ...canvasSizeStyle, userSelect: "none" }}
-              />
-              {roiOverlay}
-            </div>
-          ) : (
-            <div className="stage__empty">Base peak data not available</div>
           ))}
 
         {/* Ion Image */}
@@ -1026,9 +955,9 @@ export function ImagingPanel({
             </div>
           ))}
 
-        {/* Blend — opacity overlay of the TIC / ion / base-peak layers */}
+        {/* Blend — opacity overlay of the TIC / ion / RGB layers */}
         {view === "blend" &&
-          (tic || ionImage || basePeakMz ? (
+          (tic || ionImage || multiChannel?.images ? (
             <div className="imgframe">
               <canvas
                 ref={blendCanvasRef}
@@ -1048,23 +977,18 @@ export function ImagingPanel({
             </div>
           ))}
 
-        {/* Floating legend (tic / basepeak / ion — not multi) */}
+        {/* Floating legend (tic / ion — not multi) */}
         {showLegend && (
           <div className="stage__legend">
-            <ColormapScale
-              colormap={legendColormap}
-              onStage
-              low={bpHasImage ? bpLow : "0"}
-              high={bpHasImage ? bpHigh : "max"}
-            />
+            <ColormapScale colormap={legendColormap} onStage low="0" high="max" />
           </div>
         )}
 
         {/* Zoom control (any image view). Wheel over the stage also zooms. */}
         {(ticHasImage ||
-          bpHasImage ||
           ionHasImage ||
-          (view === "multi" && !!multiChannel?.images)) && (
+          (view === "multi" && !!multiChannel?.images) ||
+          (view === "blend" && (!!tic || !!ionImage || !!multiChannel?.images))) && (
           <div className="stage__zoom" role="group" aria-label="Zoom">
             <button className="iconbtn" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
               −

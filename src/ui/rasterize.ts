@@ -246,12 +246,20 @@ export function rasterizeImage(
  * linear scale). All Phase 3 callers continue to work with the same two-arg signature.
  *
  * - Absent cells (presenceMask[k]===0) → SENTINEL RGBA, alpha 255 (D-09).
- * - Present cells → viridis(clamp(tic[k] / clipMax)), alpha 255, where `clipMax`
+ * - Present cells → colormap(clamp(tic[k] / clipMax)), alpha 255, where `clipMax`
  *   is the present-only 99th percentile. Non-finite/negative normalize to 0.
  * - No cell reorder: out[k*4..] derives from tic[k] (orientation owned upstream).
+ *
+ * The overview TIC honors the global colormap + scale (UAT-r3): the selector on
+ * the Overview tab recolors the TIC just as it does the ion image.
  */
-export function rasterizeTic(tic: Float32Array, grid: ImagingGrid): Uint8ClampedArray {
-  return rasterizeImage(tic, grid, { colormap: "viridis", percentile: 0.99, logScale: false });
+export function rasterizeTic(
+  tic: Float32Array,
+  grid: ImagingGrid,
+  colormap: Colormap = "viridis",
+  logScale = false,
+): Uint8ClampedArray {
+  return rasterizeImage(tic, grid, { colormap, percentile: 0.99, logScale });
 }
 
 /**

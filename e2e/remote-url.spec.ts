@@ -57,6 +57,8 @@ test("LOAD-02: loads a .mzpeak URL via HTTP Range requests, not a full download"
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
   // Manifest and metadata loaded — the ZIP was parsed from Range requests.
+  // Both now live under the collapsed "Format details" accordion (UAT-r3).
+  await page.getByRole("button", { name: /Format details/i }).click();
   const manifestRows = page.getByTestId("manifest-row");
   await expect(manifestRows.first()).toBeVisible();
   expect(await manifestRows.count()).toBeGreaterThan(0);

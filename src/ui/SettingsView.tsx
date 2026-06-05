@@ -10,7 +10,7 @@ import type { HistogramMode } from "../compute/histogram";
  *    spectrum to render that mass's ion image)
  *  - rendering: colormap, scale, percentile clip, TIC-normalize, smooth σ, contrast
  */
-export function SettingsView() {
+export function SettingsView({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const colormap = useStore((s) => s.colormap);
   const scale = useStore((s) => s.scale);
   const percentile = useStore((s) => s.percentile);
@@ -25,7 +25,7 @@ export function SettingsView() {
   const setPeakDeltaMass = useStore((s) => s.setPeakDeltaMass);
 
   return (
-    <Panel title="Settings" testid="settings-view">
+    <Panel title="Settings" testid="settings-view" defaultOpen={defaultOpen}>
       <div className="settings-card__group">
         <div className="mz-overline">Interaction</div>
         <div className="popover__row">

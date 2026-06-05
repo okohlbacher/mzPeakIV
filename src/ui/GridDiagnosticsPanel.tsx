@@ -22,7 +22,7 @@ function coordSourceLabel(strategy: CoordSourceStrategy): string {
  *    Badge in the title.
  *  - non-imaging file (grid === null, isImaging false) → calm muted notice (D-04).
  */
-export function GridDiagnosticsPanel() {
+export function GridDiagnosticsPanel({ defaultOpen = true }: { defaultOpen?: boolean }) {
   const grid = useStore((s) => s.grid);
   const capabilities = useStore((s) => s.capabilities);
 
@@ -30,7 +30,7 @@ export function GridDiagnosticsPanel() {
 
   if (grid === null && capabilities.isImaging === false) {
     return (
-      <Panel title="Grid" testid="grid-panel">
+      <Panel title="Grid diagnostics" testid="grid-panel" defaultOpen={defaultOpen}>
         <span
           data-testid="grid-not-imaging-notice"
           style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}
@@ -43,7 +43,7 @@ export function GridDiagnosticsPanel() {
 
   if (grid === null) return null;
 
-  const { width, height, filledCount, totalCells, pixelSizeUm, diagnostics } = grid;
+  const { filledCount, totalCells, diagnostics } = grid;
   const { uniqueCoordCount, spectrumCount, missingCount, duplicateCount } = diagnostics;
 
   const pct = Math.round((filledCount / totalCells) * 100);
@@ -54,8 +54,9 @@ export function GridDiagnosticsPanel() {
 
   return (
     <Panel
-      title="Grid"
+      title="Grid diagnostics"
       testid="grid-panel"
+      defaultOpen={defaultOpen}
       count={
         anomaly ? (
           <span data-testid="grid-anomaly-warning">
@@ -69,25 +70,6 @@ export function GridDiagnosticsPanel() {
       }
     >
       <div data-testid="grid-diagnostics-table">
-        <StatRow
-          label="Dimensions"
-          testid="grid-row-dimensions"
-          value={
-            <>
-              {width.toLocaleString()} × {height.toLocaleString()} <em>px</em>
-            </>
-          }
-        />
-        <StatRow
-          label="Fill"
-          testid="grid-row-fill"
-          value={
-            <>
-              {filledCount.toLocaleString()} / {totalCells.toLocaleString()}{" "}
-              <em>px ({pct}%)</em>
-            </>
-          }
-        />
         <StatRow
           label="Spectra"
           testid="grid-row-spectra"
@@ -117,20 +99,6 @@ export function GridDiagnosticsPanel() {
               <>
                 {duplicateCount.toLocaleString()} <em>px</em>
               </>
-            )
-          }
-        />
-        <StatRow
-          label="Pixel size"
-          testid="grid-row-pixel-size"
-          value={
-            pixelSizeUm ? (
-              <>
-                {pixelSizeUm.x.toLocaleString()} × {pixelSizeUm.y.toLocaleString()}{" "}
-                <em>µm</em>
-              </>
-            ) : (
-              "1:1 (assumed)"
             )
           }
         />

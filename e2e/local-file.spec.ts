@@ -32,6 +32,10 @@ async function assertLoadedUI(page: Page) {
   // No error banner.
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
+  // Manifest, raw metadata, and capabilities now live under the collapsed
+  // "Format details" accordion (UAT-r3) — expand it before asserting them.
+  await page.getByRole("button", { name: /Format details/i }).click();
+
   // Manifest has at least one real entity row.
   const manifestRows = page.getByTestId("manifest-row");
   await expect(manifestRows.first()).toBeVisible();
@@ -168,6 +172,9 @@ test("m/z range shows 'not available' or a numeric range — never blank (R-02d)
     /^(Ready|No Imaging Data)$/,
     { timeout: 30000 },
   );
+
+  // The "MS Image" panel is collapsed by default (UAT-r3) — expand it.
+  await page.getByRole("button", { name: /MS Image/i }).click();
 
   const mzRangeCell = page.getByTestId("stat-mz-range");
   await expect(mzRangeCell).toBeVisible();

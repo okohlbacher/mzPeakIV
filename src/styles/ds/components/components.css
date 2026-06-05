@@ -324,3 +324,14 @@
 }
 .mz-panel__body { padding: 0 var(--space-5) var(--space-5); }
 .mz-panel[data-open="false"] .mz-panel__body { display: none; }
+
+/* Nested sub-panels inside the collapsed "Format details" accordion (UAT-r3):
+   lighter chrome + a hairline rail so the advanced internals read as a grouped
+   sub-list rather than full top-level panels. */
+.format-details {
+  border-left: var(--border-width) solid var(--border-hairline);
+  margin-left: var(--space-2);
+}
+.format-details .mz-panel:last-child { border-bottom: none; }
+.format-details .mz-panel__head { padding-block: var(--space-3); }
+.format-details .mz-panel__title { color: var(--text-faint); }

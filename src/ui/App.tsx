@@ -6,10 +6,9 @@ import { STAGE_LABEL } from "./stageLabels";
 import { FileLoader } from "./FileLoader";
 import { ProgressBar } from "./ProgressBar";
 import { ErrorBanner } from "./ErrorBanner";
-import { MetadataPanel } from "./MetadataPanel";
+import { SampleRunPanel } from "./SampleRunPanel";
 import { StatsPanel } from "./StatsPanel";
-import { CapabilitiesPanel } from "./CapabilitiesPanel";
-import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
+import { FormatDetailsPanel } from "./FormatDetailsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
 import { SettingsView } from "./SettingsView";
@@ -55,7 +54,6 @@ export function App() {
   const [railOpen, setRailOpen] = useState(false); // narrow-screen rail overlay
   const [reopen, setReopen] = useState(false); // "Open file" re-shows the loader
   const [view, setView] = useState<View>("overview");
-  const [overviewMode, setOverviewMode] = useState<"tic" | "basepeak">("tic");
 
   useEffect(() => {
     const mq = window.matchMedia(WIDE_QUERY);
@@ -134,11 +132,10 @@ export function App() {
                   ready
                 </Badge>
               </div>
-              <MetadataPanel />
+              <SampleRunPanel />
               <StatsPanel />
-              <CapabilitiesPanel />
-              {ready && <GridDiagnosticsPanel />}
               <SettingsView />
+              <FormatDetailsPanel />
             </aside>
           )}
           {railVisible && !isWide && (
@@ -151,12 +148,7 @@ export function App() {
             {hasShell && (
               <>
                 {ready && isImaging ? (
-                  <ImagingPanel
-                    view={view}
-                    setView={setView}
-                    overviewMode={overviewMode}
-                    setOverviewMode={setOverviewMode}
-                  />
+                  <ImagingPanel view={view} setView={setView} />
                 ) : (
                   <div
                     style={{

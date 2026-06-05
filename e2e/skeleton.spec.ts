@@ -25,6 +25,10 @@ test("loads a real .mzpeak by URL, shows metadata + manifest, plots a spectrum",
   // No error banner.
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
 
+  // Manifest + raw metadata now live under the collapsed "Format details"
+  // accordion (UAT-r3) — expand it before asserting their content.
+  await page.getByRole("button", { name: /Format details/i }).click();
+
   // Left panel: manifest has at least one real entity row.
   const manifestRows = page.getByTestId("manifest-row");
   await expect(manifestRows.first()).toBeVisible();

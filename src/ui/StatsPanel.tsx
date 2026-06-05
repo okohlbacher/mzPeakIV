@@ -2,12 +2,14 @@ import { useStore } from "../state/store";
 import { Panel, StatRow, Badge } from "./ds";
 
 /**
- * Inspector "Image Info" panel: dimensions (from grid), spectra count, m/z
- * range, MS levels, profile/centroid mode. Reskinned to Panel + StatRow + Badge.
- * Renders when a file is open (capabilities set). Missing fields show an em-dash
- * via StatRow's null fallback — grid/stats arrive lazily.
+ * "MS Image" panel (UAT-r3): the single source of truth for the researcher-facing
+ * image geometry + acquisition counts. Merges the former "Image Info" stats with
+ * the researcher-relevant parts of the Grid panel (pixel size, physical extent,
+ * fill coverage) so dimensions/spectra are no longer duplicated across panels.
+ * Format-implementer diagnostics (coord source, discovery, duplicates) stay under
+ * "Format details". Renamed "MS Image" to distinguish from optical images.
  */
-export function StatsPanel() {
+export function StatsPanel({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const stats = useStore((s) => s.stats);
   const grid = useStore((s) => s.grid);
   const capabilities = useStore((s) => s.capabilities);
@@ -22,8 +24,18 @@ export function StatsPanel() {
   const fmt = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 
+  // Physical extent (mm) from grid dimensions × pixel size.
+  const extentMm =
+    grid && grid.pixelSizeUm
+      ? {
+          x: (grid.width * grid.pixelSizeUm.x) / 1000,
+          y: (grid.height * grid.pixelSizeUm.y) / 1000,
+        }
+      : null;
+  const fillPct = grid ? Math.round((grid.filledCount / grid.totalCells) * 100) : null;
+
   return (
-    <Panel title="Image Info" testid="stats-panel">
+    <Panel title="MS Image" testid="stats-panel" defaultOpen={defaultOpen}>
       <div data-testid="stats-table">
         {capabilities.isImaging && (
           <StatRow
@@ -32,10 +44,47 @@ export function StatsPanel() {
             value={
               grid ? (
                 <>
-                  {grid.width.toLocaleString()} × {grid.height.toLocaleString()}{" "}
-                  <em>px</em>
+                  {grid.width.toLocaleString()} × {grid.height.toLocaleString()} <em>px</em>
                 </>
               ) : null
+            }
+          />
+        )}
+
+        {capabilities.isImaging && grid?.pixelSizeUm && (
+          <StatRow
+            label="Pixel size"
+            testid="stat-pixel-size"
+            value={
+              <>
+                {grid.pixelSizeUm.x.toLocaleString()} × {grid.pixelSizeUm.y.toLocaleString()}{" "}
+                <em>µm</em>
+              </>
+            }
+          />
+        )}
+
+        {capabilities.isImaging && extentMm && (
+          <StatRow
+            label="Extent"
+            testid="stat-extent"
+            value={
+              <>
+                {extentMm.x.toFixed(1)} × {extentMm.y.toFixed(1)} <em>mm</em>
+              </>
+            }
+          />
+        )}
+
+        {capabilities.isImaging && fillPct !== null && (
+          <StatRow
+            label="Coverage"
+            testid="stat-coverage"
+            value={
+              <>
+                {grid!.filledCount.toLocaleString()} / {grid!.totalCells.toLocaleString()}{" "}
+                <em>px ({fillPct}%)</em>
+              </>
             }
           />
         )}
@@ -73,9 +122,7 @@ export function StatsPanel() {
               <span style={{ display: "inline-flex", gap: "var(--space-3)" }}>
                 {repr.profile > 0 && (
                   <Badge tone="info" mono>
-                    <span data-testid="repr-profile">
-                      {repr.profile.toLocaleString()} profile
-                    </span>
+                    <span data-testid="repr-profile">{repr.profile.toLocaleString()} profile</span>
                   </Badge>
                 )}
                 {repr.centroid > 0 && (
