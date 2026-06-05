@@ -65,6 +65,10 @@ export type WorkerRequest =
  *   serialized StoreError shape (classifyError runs inside the Worker)
  */
 export type WorkerResponse =
+  // Posted once, after the Worker's onmessage handler is registered (past the
+  // top-level-await WASM init). The main thread buffers load requests until this
+  // arrives so a fast load can't be dropped during worker init (see store.ts).
+  | { type: "ready" }
   | { type: "progress"; stage: LoadStage }
   | { type: "loadResult"; result: LoadResult }
   | { type: "noImaging"; result: NonImagingResult }

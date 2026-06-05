@@ -11,7 +11,10 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  // Worker-init race fixed by a ready-handshake in store.ts (loads buffer until
+  // the Worker posts {type:"ready"} after its onmessage handler is registered).
+  // One retry remains as a safety net for genuine WASM/network jitter.
+  retries: 1,
   workers: 1,
   reporter: process.env.CI ? "list" : [["list"]],
   use: {

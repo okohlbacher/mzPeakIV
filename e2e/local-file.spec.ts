@@ -21,10 +21,13 @@ const FIXTURE_PATH = path.resolve(__dirname, "../test/data/small.mzpeak");
  * render real data (manifest rows, metadata block, stats line).
  */
 async function assertLoadedUI(page: Page) {
-  // Wait for staged load to reach "ready".
-  await expect(page.getByTestId("stage")).toHaveText("Ready", {
-    timeout: 30000,
-  });
+  // Wait for staged load to reach a non-error TERMINAL state. The fixture
+  // (small.mzpeak) is non-imaging → terminal "No Imaging Data" (D-06); an
+  // imaging file would reach "Ready". Metadata/manifest/spectrum hold in both.
+  await expect(page.getByTestId("stage")).toHaveText(
+    /^(Ready|No Imaging Data)$/,
+    { timeout: 30000 },
+  );
 
   // No error banner.
   await expect(page.getByTestId("error-banner")).toHaveCount(0);
@@ -99,8 +102,8 @@ test("loads a .mzpeak via file picker (page.setInputFiles) — asserts staged pr
   // Now wait for load to complete and assert the full inspection UI.
   await assertLoadedUI(page);
 
-  // The stage display in the header also transitions to "Ready".
-  await expect(stageEl).toHaveText("Ready");
+  // The stage sentinel reaches a non-error terminal (non-imaging demo → D-06).
+  await expect(stageEl).toHaveText(/^(Ready|No Imaging Data)$/);
 });
 
 // ── Test 2: Drag-and-drop ──────────────────────────────────────────────────
@@ -161,9 +164,10 @@ test("m/z range shows 'not available' or a numeric range — never blank (R-02d)
   await page.goto("./");
   await page.getByTestId("file-input").setInputFiles(FIXTURE_PATH);
 
-  await expect(page.getByTestId("stage")).toHaveText("Ready", {
-    timeout: 30000,
-  });
+  await expect(page.getByTestId("stage")).toHaveText(
+    /^(Ready|No Imaging Data)$/,
+    { timeout: 30000 },
+  );
 
   const mzRangeCell = page.getByTestId("stat-mz-range");
   await expect(mzRangeCell).toBeVisible();

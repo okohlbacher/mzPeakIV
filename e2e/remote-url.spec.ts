@@ -47,8 +47,11 @@ test("LOAD-02: loads a .mzpeak URL via HTTP Range requests, not a full download"
   const stageLabel = page.getByTestId("stage");
   await expect(stageLabel).not.toHaveText("Idle", { timeout: 5000 });
 
-  // Wait for full load.
-  await expect(stageLabel).toHaveText("Ready", { timeout: 30000 });
+  // Wait for full load — non-error terminal. The bundled demo is non-imaging
+  // (terminal "No Imaging Data", D-06); an imaging file would reach "Ready".
+  await expect(stageLabel).toHaveText(/^(Ready|No Imaging Data)$/, {
+    timeout: 30000,
+  });
 
   // No error banner.
   await expect(page.getByTestId("error-banner")).toHaveCount(0);

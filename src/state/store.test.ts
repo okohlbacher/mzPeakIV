@@ -46,6 +46,14 @@ function simulateWorkerMessage(data: unknown): void {
   handler(new MessageEvent("message", { data }));
 }
 
+// The real Worker posts {type:"ready"} once its onmessage handler is registered;
+// the store buffers loads until then (worker-init race fix). The mock Worker
+// never sends it, so fire it once up front — otherwise openUrl/openFile would
+// buffer their postMessage indefinitely and the dispatch assertions would fail.
+beforeEach(() => {
+  simulateWorkerMessage({ type: "ready" });
+});
+
 describe("store.openUrl", () => {
   beforeEach(() => {
     mockPostMessage.mockClear();

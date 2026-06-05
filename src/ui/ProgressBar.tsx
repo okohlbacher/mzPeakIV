@@ -1,28 +1,7 @@
 import type { LoadStage } from "../reader/types";
-
-/** Ordered stages for the progress display. */
-const STAGES: LoadStage[] = [
-  "zip-index",
-  "manifest",
-  "metadata",
-  "grid",
-  "tic",
-  "ready",
-];
-
-const STAGE_LABEL: Record<LoadStage, string> = {
-  idle: "Idle",
-  "zip-index": "Reading ZIP index…",
-  manifest: "Parsing manifest…",
-  metadata: "Loading metadata…",
-  grid: "Building imaging grid…",
-  tic: "Rendering TIC image…",
-  ready: "Ready",
-  // D-06: 'no-imaging' is a terminal state — not a progress step (not in STAGES array)
-  // but must appear in STAGE_LABEL to satisfy Record<LoadStage, string> exhaustiveness.
-  "no-imaging": "No Imaging Data",
-  error: "Error",
-};
+// Single source of truth shared with App.tsx's hidden `stage` sentinel — the two
+// must never drift (the e2e suite gates on the sentinel's exact text).
+import { STAGE_LABEL, PROGRESS_STAGES as STAGES } from "./stageLabels";
 
 interface Props {
   stage: LoadStage;

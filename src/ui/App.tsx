@@ -1,4 +1,8 @@
+import { useEffect, useState } from "react";
+import { PanelLeft, FolderOpen } from "lucide-react";
+
 import { useStore } from "../state/store";
+import { STAGE_LABEL } from "./stageLabels";
 import { FileLoader } from "./FileLoader";
 import { ProgressBar } from "./ProgressBar";
 import { ErrorBanner } from "./ErrorBanner";
@@ -8,11 +12,26 @@ import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
+import { Badge } from "./ds";
 
+const LOGO = `${import.meta.env.BASE_URL}openms-logo.png`;
+const WIDE_QUERY = "(min-width: 1041px)";
+
+/**
+ * Persistent application shell (Phase 2): top bar / inspector rail / center
+ * (ImagingPanel stage) / spectrum dock / status bar. The frame is invariant;
+ * only the body content swaps by load stage.
+ *
+ * Phase 2 slots the existing panels UNCHANGED into the rail/dock and keeps
+ * ImagingPanel whole in the center. The toolbar + dark-stage split and the
+ * settings popover land in Phase 4; the loader card + uPlot dock sizing in P5.
+ */
 export function App() {
   const stage = useStore((s) => s.stage);
   const error = useStore((s) => s.error);
   const isImaging = useStore((s) => s.capabilities?.isImaging ?? false);
+  const grid = useStore((s) => s.grid);
+  const stats = useStore((s) => s.stats);
 
   const loading =
     stage === "zip-index" ||
@@ -20,121 +39,199 @@ export function App() {
     stage === "metadata" ||
     stage === "grid" ||
     stage === "tic";
+  const ready = stage === "ready";
+  const noImaging = stage === "no-imaging";
+  const isError = stage === "error";
+  const hasShell = ready || noImaging; // full chrome states
+
+  // ── Presentation-only state (never the store) ──────────────────────────────
+  const [isWide, setIsWide] = useState<boolean>(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia(WIDE_QUERY).matches
+      : true,
+  );
+  const [railOpen, setRailOpen] = useState(false); // narrow-screen rail overlay
+  const [reopen, setReopen] = useState(false); // "Open file" re-shows the loader
+
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE_QUERY);
+    const onChange = () => setIsWide(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // Clear the "reopen" overlay once a fresh load actually starts.
+  useEffect(() => {
+    if (loading || ready || noImaging) setReopen(false);
+  }, [loading, ready, noImaging]);
+
+  const showLoaderOverlay = stage === "idle" || reopen;
+  const railVisible = hasShell && (isWide || railOpen);
 
   return (
-    <div
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-      }}
-    >
-      <header style={{ padding: "0.75rem", borderBottom: "1px solid #ddd" }}>
-        <h1 style={{ margin: "0 0 0.5rem" }}>mzPeakIV</h1>
-        <FileLoader loading={loading} />
-        {/* Hidden stage sentinel — keeps the skeleton + local-file e2e tests working.
-            The visible stage readout is provided by ProgressBar. */}
-        <span
-          data-testid="stage"
-          aria-hidden="true"
-          style={{ display: "none" }}
-        >
-          {stage === "zip-index"
-            ? "Reading ZIP index…"
-            : stage === "manifest"
-              ? "Parsing manifest…"
-              : stage === "metadata"
-                ? "Loading metadata…"
-                : stage === "grid"
-                  ? "Building imaging grid…"
-                  : stage === "tic"
-                    ? "Building TIC image…"
-                    : stage === "no-imaging"
-                      ? "No Imaging Data"
-                      : stage === "ready"
-                        ? "Ready"
-                        : stage === "error"
-                          ? "Error"
-                          : "Idle"}
-        </span>
-      </header>
+    <div className="app">
+      {/* ALWAYS-MOUNTED hidden stage sentinel — text-only, exact STAGE_LABEL
+          string, no sibling content. The e2e suite gates on toHaveText("Ready")
+          etc.; this element must never be merged into a visible status node. */}
+      <span data-testid="stage" aria-hidden="true" style={{ display: "none" }}>
+        {STAGE_LABEL[stage]}
+      </span>
 
-      <ProgressBar stage={stage} />
-
-      {stage === "error" && error && <ErrorBanner error={error} />}
-
-      {stage === "no-imaging" && (
-        <main style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          <aside
-            style={{
-              width: 400,
-              flexShrink: 0,
-              overflow: "auto",
-              borderRight: "1px solid #ddd",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <MetadataPanel />
-            <StatsPanel />
-            <CapabilitiesPanel />
-          </aside>
-          <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0 }}>
-            <SpectrumPanel />
-            <div style={{ padding: "1rem", color: "#888", fontSize: "0.85rem" }}>
-              No spatial imaging coordinates — spectrum browser only.
-            </div>
+      <div className="shell">
+        {/* ── Top bar ───────────────────────────────────────────────────── */}
+        <header className="topbar">
+          {hasShell && !isWide && (
+            <button
+              className="iconbtn topbar__menu"
+              aria-label="Toggle inspector"
+              aria-pressed={railOpen}
+              onClick={() => setRailOpen((v) => !v)}
+            >
+              <PanelLeft size={16} />
+            </button>
+          )}
+          <div className="topbar__brand">
+            <img src={LOGO} alt="OpenMS" />
           </div>
-        </main>
-      )}
+          <div className="topbar__div" />
+          <div className="topbar__prod">
+            <b>mzPeak IV</b>
+            <span>imaging viewer</span>
+          </div>
+          {stats && (
+            <div className="topbar__file" title="loaded dataset">
+              {stats.numSpectra.toLocaleString()} spectra
+            </div>
+          )}
+          <div className="topbar__spacer" />
+          <div className="topbar__actions">
+            {(hasShell || isError) && (
+              <button
+                className="iconbtn"
+                aria-label="Open file"
+                onClick={() => setReopen(true)}
+              >
+                <FolderOpen size={16} />
+              </button>
+            )}
+          </div>
+        </header>
 
-      {stage === "ready" && (
-        <main style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          {/* Left inspection column */}
-          <aside
-            style={{
-              width: 400,
-              flexShrink: 0,
-              overflow: "auto",
-              borderRight: "1px solid #ddd",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <MetadataPanel />
-            <StatsPanel />
-            <CapabilitiesPanel />
-            <GridDiagnosticsPanel />
-          </aside>
-
-          {/* Right pane: spectrum always at TOP (compact), imaging panels below */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              flex: 1,
-              minWidth: 0,
-              minHeight: 0,
-            }}
-          >
-            {/* Compact spectrum panel — low vertical profile, always visible */}
-            <SpectrumPanel />
-
-            {/* Imaging canvases fill remaining space */}
-            {isImaging ? (
-              <div style={{ flex: 1, overflow: "auto" }}>
-                <ImagingPanel />
+        {/* ── Body ──────────────────────────────────────────────────────── */}
+        <div className={`body${railVisible && isWide ? "" : " body--norail"}`}>
+          {railVisible && (
+            <aside
+              className={`rail mz-scroll${!isWide ? " rail--overlay" : ""}`}
+              data-testid="inspector-rail"
+            >
+              <div className="rail__head">
+                <span className="rail__title">Inspector</span>
+                <Badge tone="success" dot>
+                  ready
+                </Badge>
               </div>
-            ) : (
-              /* Non-imaging: extra padding/info where imaging panel would be */
-              <div style={{ flex: 1, padding: "1rem", color: "#888", fontSize: "0.85rem" }}>
-                This file contains mass spectra but no spatial imaging coordinates.
-                <br />Open an imaging file to explore ion images.
+              <MetadataPanel />
+              <StatsPanel />
+              <CapabilitiesPanel />
+              {ready && <GridDiagnosticsPanel />}
+            </aside>
+          )}
+          {railVisible && !isWide && (
+            <div className="rail-backdrop" onClick={() => setRailOpen(false)} />
+          )}
+
+          <div className="center">
+            {loading && <ProgressBar stage={stage} />}
+
+            {hasShell && (
+              <>
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: "auto",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {ready && isImaging ? (
+                    <ImagingPanel />
+                  ) : (
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "grid",
+                        placeItems: "center",
+                        padding: "1rem",
+                        color: "var(--text-muted)",
+                        fontSize: "var(--text-sm)",
+                        textAlign: "center",
+                      }}
+                    >
+                      no spatial imaging coordinates — spectrum browser only
+                    </div>
+                  )}
+                </div>
+                {/* Spectrum dock (P5 applies the rigid 188px + uPlot ResizeObserver). */}
+                <div
+                  style={{
+                    flexShrink: 0,
+                    maxHeight: 240,
+                    overflow: "auto",
+                    borderTop: "1px solid var(--border-hairline)",
+                    background: "var(--surface)",
+                  }}
+                >
+                  <SpectrumPanel />
+                </div>
+              </>
+            )}
+
+            {isError && error && (
+              <div style={{ padding: "1rem", overflow: "auto" }}>
+                <ErrorBanner error={error} />
               </div>
             )}
           </div>
-        </main>
+        </div>
+
+        {/* ── Status bar ────────────────────────────────────────────────── */}
+        <footer className="statusbar">
+          <span className="statusbar__dot">
+            <b />
+            mzPeak v0.3 · client-side
+          </span>
+          <span>{STAGE_LABEL[stage]}</span>
+          <span className="statusbar__spacer" />
+          {grid && (
+            <span>
+              {grid.width} × {grid.height} px
+            </span>
+          )}
+          {grid && (
+            <span>
+              {grid.filledCount.toLocaleString()} /{" "}
+              {grid.totalCells.toLocaleString()} spectra
+            </span>
+          )}
+        </footer>
+      </div>
+
+      {/* ── Loader overlay (idle, or "Open file") ─────────────────────────── */}
+      {showLoaderOverlay && (
+        <div className="loader">
+          <div className="loader__card">
+            <img className="loader__logo" src={LOGO} alt="OpenMS" />
+            <div className="loader__h">Open an imaging mzPeak file</div>
+            <div className="loader__p">
+              reconstruct the spatial pixel grid, render ion images for an m/z
+              window, and inspect the spectrum behind any pixel — entirely in the
+              browser.
+            </div>
+            <FileLoader loading={loading} />
+            {loading && <ProgressBar stage={stage} />}
+          </div>
+        </div>
       )}
     </div>
   );

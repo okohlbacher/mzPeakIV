@@ -13,10 +13,14 @@ test("loads a real .mzpeak by URL, shows metadata + manifest, plots a spectrum",
   await expect(page.getByTestId("url-input")).toHaveValue(/small\.mzpeak$/);
   await page.getByTestId("load-button").click();
 
-  // Wait for the staged load to reach "ready".
-  await expect(page.getByTestId("stage")).toHaveText("Ready", {
-    timeout: 30000,
-  });
+  // Wait for the staged load to reach a non-error TERMINAL state. The bundled
+  // demo (small.mzpeak) is a non-imaging LC-MS file, so its correct terminal is
+  // "No Imaging Data" (requirement D-06); an imaging file would reach "Ready".
+  // The walking-skeleton proof (metadata + manifest + spectrum) holds in both.
+  await expect(page.getByTestId("stage")).toHaveText(
+    /^(Ready|No Imaging Data)$/,
+    { timeout: 30000 },
+  );
 
   // No error banner.
   await expect(page.getByTestId("error-banner")).toHaveCount(0);

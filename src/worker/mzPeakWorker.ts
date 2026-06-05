@@ -165,7 +165,36 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
   await yieldFrame();
 
   if (!isImaging) {
+    // Send the manifest immediately (fast — index only) so the UI is responsive,
+    // then background-init the full reader to populate fileMeta + stats +
+    // capabilities. For a non-imaging file there is no deferred "render ion
+    // image" trigger, so the inspection panels would otherwise stay empty — the
+    // user just wants to browse metadata + spectra right away. The store's
+    // noImaging handler MERGES, so this second message fills in the details.
     send({ type: "noImaging", result: { manifest, fileMeta: null, stats: null, capabilities } });
+    void (async () => {
+      if (!activeZipStorage) return;
+      try {
+        const reader = await openReaderFromStore(activeZipStorage);
+        const manifestEntries = readManifest(reader);
+        const fileMeta = readFileMeta(reader);
+        const stats = computeStats(reader, manifestEntries);
+        const fullCaps = computeCapabilities(reader, manifestEntries);
+        activeReader = reader;
+        activeStats = stats;
+        send({
+          type: "noImaging",
+          result: {
+            manifest: manifestEntries,
+            fileMeta,
+            stats,
+            capabilities: { ...fullCaps, isImaging: false },
+          },
+        });
+      } catch (e) {
+        console.warn("[runFastLoad] non-imaging full metadata load failed:", e);
+      }
+    })();
     return;
   }
 
@@ -1043,3 +1072,13 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     postError(err);
   }
 };
+
+// Ready handshake. With vite-plugin-top-level-await, this module's top-level code
+// (including the `self.onmessage = …` assignment above) runs INSIDE an async
+// wrapper that first awaits the WASM top-level-await imports. A load message
+// posted by the main thread before that wrapper resolves arrives before
+// `onmessage` is registered and is dropped — a race that deterministically hangs
+// fast programmatic loads (e.g. setInputFiles immediately after page open). By
+// posting `ready` here — AFTER onmessage is registered — the main thread can
+// buffer load requests until the worker is provably listening. (See store.ts.)
+send({ type: "ready" });

@@ -143,13 +143,35 @@ let currentRequestId = 0;
 // the echoed images with the originating ChannelRequest array on result.
 let currentMcChannels: (ChannelRequest | null)[] = [];
 
+// ---------------------------------------------------------------------------
+// Worker-ready handshake (fixes a worker-init race).
+//
+// With vite-plugin-top-level-await, the Worker registers its onmessage handler
+// only AFTER its top-level-await WASM imports resolve. A load posted before that
+// arrives with no handler and is silently dropped — which deterministically
+// hangs a fast programmatic load (e.g. a load triggered a few ms after the page
+// opens). The Worker posts `{type:"ready"}` once its handler is registered; we
+// hold the single most-recent load thunk until then, replaying it on ready.
+// Render/select messages are never buffered — they can only fire after a load
+// has completed, by which point the Worker is long past ready.
+// ---------------------------------------------------------------------------
+let workerReady = false;
+let pendingLoad: (() => void) | null = null;
+
+function postLoadWhenReady(send: () => void): void {
+  if (workerReady) send();
+  else pendingLoad = send; // keep only the latest pending load
+}
+
 export const useStore = create<State & Actions>((set) => ({
   ...initialState,
 
   openUrl(url: string) {
     currentRequestId = Date.now();
     set({ ...initialState, stage: "zip-index" });
-    worker.postMessage({ type: "loadUrl", url } satisfies WorkerRequest);
+    postLoadWhenReady(() =>
+      worker.postMessage({ type: "loadUrl", url } satisfies WorkerRequest),
+    );
   },
 
   async openFile(file: File) {
@@ -171,9 +193,12 @@ export const useStore = create<State & Actions>((set) => ({
     // Transfer ownership of the ArrayBuffer to the Worker (Pattern 4 / Pitfall 3).
     // File objects cannot cross the Worker boundary reliably — convert to ArrayBuffer
     // on the main thread first, then transfer the buffer zero-copy.
-    worker.postMessage(
-      { type: "loadFile", bytes: buffer, name: file.name } satisfies WorkerRequest,
-      [buffer],
+    const bytes = buffer;
+    postLoadWhenReady(() =>
+      worker.postMessage(
+        { type: "loadFile", bytes, name: file.name } satisfies WorkerRequest,
+        [bytes],
+      ),
     );
   },
 
@@ -266,6 +291,15 @@ export const useStore = create<State & Actions>((set) => ({
 worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
   const msg = e.data;
   switch (msg.type) {
+    case "ready": {
+      // Worker's onmessage is registered — safe to deliver any buffered load.
+      workerReady = true;
+      const load = pendingLoad;
+      pendingLoad = null;
+      load?.();
+      break;
+    }
+
     case "progress":
       useStore.setState({ stage: msg.stage });
       break;
