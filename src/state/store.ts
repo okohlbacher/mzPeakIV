@@ -343,8 +343,11 @@ export const useStore = create<State & Actions>((set) => ({
     if (validChannels.length === 0) return;
     currentMcChannels = channels;
     const rid = ++currentRequestId;
+    set({ isRendering: true });
+    // Send the FULL (position-aligned) array — the worker returns one image per
+    // position (null for disabled channels) so R/G/B compositing stays aligned.
     worker.postMessage(
-      { type: "renderMultiChannel", channels: validChannels, requestId: rid } satisfies WorkerRequest,
+      { type: "renderMultiChannel", channels, requestId: rid } satisfies WorkerRequest,
     );
   },
 
@@ -355,7 +358,9 @@ export const useStore = create<State & Actions>((set) => ({
 
   // BL-06: Request mean spectrum for a selected ROI.
   requestRoiSpectrum(spectrumIndices: number[]) {
-    set({ roiIndices: spectrumIndices });
+    // Clear the single-pixel selection so the ROI mean spectrum takes the dock
+    // (the result arrives as meanSpectrum). roiIndices drives the dock display.
+    set({ roiIndices: spectrumIndices, selectedIndex: null, selectedSpectrum: null });
     worker.postMessage({ type: "roiSpectrum", spectrumIndices } satisfies WorkerRequest);
   },
 
@@ -464,6 +469,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
           channels: currentMcChannels,
           images: msg.channels,
         },
+        isRendering: false,
       });
       break;
 

@@ -110,6 +110,18 @@
 .stage canvas.cross { cursor: crosshair; }
 .selring { position: absolute; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.6); pointer-events: none; mix-blend-mode: difference; }
 
+/* ROI selection rectangle — DOM overlay over the active canvas (works on every
+   image view). Positioned in display px by gridRectToPx; pointer-events:none so
+   it never blocks the drag/click on the canvas beneath. */
+.roi-rect {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed #fff;
+  outline: 1px dashed rgba(0, 0, 0, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+
 /* Stage overlays — pointer-events:none so clicks pass through to the canvas. */
 .stage__legend {
   position: absolute; left: var(--space-6); bottom: var(--space-6);

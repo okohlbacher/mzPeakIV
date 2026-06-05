@@ -43,7 +43,9 @@ export type WorkerRequest =
   | { type: "loadFile"; bytes: ArrayBuffer; name: string }
   | { type: "renderIonImage"; mz: number; tolDa: number; requestId: number }
   | { type: "selectSpectrum"; index: number }
-  | { type: "renderMultiChannel"; channels: ChannelRequest[]; requestId: number }
+  // channels is position-aligned (length up to 3); a null entry = disabled
+  // channel, so the result images stay aligned to R/G/B positions.
+  | { type: "renderMultiChannel"; channels: (ChannelRequest | null)[]; requestId: number }
   | { type: "meanSpectrum" }
   | { type: "roiSpectrum"; spectrumIndices: number[] };
 

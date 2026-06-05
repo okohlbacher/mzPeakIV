@@ -32,6 +32,7 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
   const requestMeanSpectrum = useStore((s) => s.requestMeanSpectrum);
   const renderIonImage = useStore((s) => s.renderIonImage);
   const peakDeltaMass = useStore((s) => s.peakDeltaMass);
+  const roiIndices = useStore((s) => s.roiIndices);
 
   // BL-03: whether the user has explicitly dismissed the mean spectrum display
   const [showMean, setShowMean] = useState(false);
@@ -58,13 +59,20 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
 
   const numSpectra = stats?.numSpectra ?? 0;
 
+  // An active ROI (rectangle selection on any image view) shows its mean
+  // spectrum in the dock. roiIndices is set by requestRoiSpectrum (which also
+  // clears the pixel selection); the result arrives as meanSpectrum.
+  const roiActive = (roiIndices?.length ?? 0) > 0;
+
   // Determine which spectrum data to show in the chart:
   // 1. selectedSpectrum (pixel) takes priority
-  // 2. meanSpectrum if showMean is true and no pixel selected
+  // 2. meanSpectrum when an ROI is active OR the user toggled mean
   // 3. null → placeholder zeros
   const activeSpectrum =
-    selectedSpectrum ?? (showMean && meanSpectrum ? meanSpectrum : null);
-  const isMeanActive = !selectedSpectrum && showMean && meanSpectrum !== null;
+    selectedSpectrum ??
+    ((showMean || roiActive) && meanSpectrum ? meanSpectrum : null);
+  const isMeanActive =
+    !selectedSpectrum && (showMean || roiActive) && meanSpectrum !== null;
 
   // BL-08: detect centroid mode
   const isCentroid =
@@ -84,7 +92,9 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
     }
   }
   if (isMeanActive) {
-    heading = "Mean spectrum";
+    heading = roiActive
+      ? `ROI mean (${roiIndices!.length.toLocaleString()} px)`
+      : "Mean spectrum";
   }
 
   // Format large intensity values (e.g. 1.2e6 instead of 1200000)
@@ -410,4 +420,8 @@ const peakCellStyle: React.CSSProperties = {
   cursor: "pointer",
   textAlign: "left",
   width: "100%",
+  // Allow the m/z number to be selected & copied; a drag-select doesn't fire
+  // the click (which renders the ion image), so both gestures coexist.
+  userSelect: "text",
+  WebkitUserSelect: "text",
 };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, FolderOpen, Settings } from "lucide-react";
+import { PanelLeft, FolderOpen } from "lucide-react";
 
 import { useStore } from "../state/store";
 import { STAGE_LABEL } from "./stageLabels";
@@ -12,6 +12,7 @@ import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
+import { SettingsView } from "./SettingsView";
 import { Badge } from "./ds";
 import type { View } from "./viewTypes";
 
@@ -108,17 +109,6 @@ export function App() {
           )}
           <div className="topbar__spacer" />
           <div className="topbar__actions">
-            {ready && isImaging && (
-              <button
-                className="iconbtn"
-                aria-label="Settings"
-                aria-pressed={view === "settings"}
-                onClick={() => setView("settings")}
-                title="Global settings"
-              >
-                <Settings size={16} />
-              </button>
-            )}
             {(hasShell || isError) && (
               <button
                 className="iconbtn"
@@ -148,6 +138,7 @@ export function App() {
               <StatsPanel />
               <CapabilitiesPanel />
               {ready && <GridDiagnosticsPanel />}
+              <SettingsView />
             </aside>
           )}
           {railVisible && !isWide && (

@@ -1,14 +1,14 @@
 import { useStore } from "../state/store";
-import { SegmentedControl, Select, Checkbox, NumberField } from "./ds";
+import { Panel, SegmentedControl, Select, Checkbox, NumberField } from "./ds";
 import type { Colormap } from "./rasterize";
 import type { HistogramMode } from "../compute/histogram";
 
 /**
- * Global settings tab (rendered on the stage when the "Settings" view is active).
+ * Global settings — a collapsible Panel in the inspector rail (left sidebar).
  * All values are GLOBAL and persisted in localStorage by the store:
+ *  - interaction: peak-click Δm/z (half-window used when clicking a peak in the
+ *    spectrum to render that mass's ion image)
  *  - rendering: colormap, scale, percentile clip, TIC-normalize, smooth σ, contrast
- *  - interaction: peak-click Δm/z (the half-window used when clicking a peak in
- *    the spectrum to render that mass's ion image)
  */
 export function SettingsView() {
   const colormap = useStore((s) => s.colormap);
@@ -25,7 +25,7 @@ export function SettingsView() {
   const setPeakDeltaMass = useStore((s) => s.setPeakDeltaMass);
 
   return (
-    <div className="settings-card mz-scroll" data-testid="settings-view" role="region" aria-label="Global settings">
+    <Panel title="Settings" testid="settings-view">
       <div className="settings-card__group">
         <div className="mz-overline">Interaction</div>
         <div className="popover__row">
@@ -129,6 +129,6 @@ export function SettingsView() {
       <p className="settings-card__hint">
         Settings are global and saved in your browser (localStorage).
       </p>
-    </div>
+    </Panel>
   );
 }

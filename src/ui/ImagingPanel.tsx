@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Grid, Image, Layers, Download, Settings } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Grid, Image, Layers, Download } from "lucide-react";
 
 import { useStore } from "../state/store";
 import {
@@ -8,7 +8,6 @@ import {
   NumberField,
   ColormapScale,
 } from "./ds";
-import { SettingsView } from "./SettingsView";
 import type { View } from "./viewTypes";
 import {
   rasterizeTic,
@@ -193,11 +192,6 @@ export function ImagingPanel({
     setMzEnd((mzWindow.mz + mzWindow.tolDa).toFixed(4));
   }, [mzWindow]);
 
-  const [ionReadout, setIonReadout] = useState<{ text: string; muted: boolean }>({
-    text: "",
-    muted: false,
-  });
-
   // BL-02: Multi-channel per-row inputs
   const [mcMz, setMcMz] = useState<[string, string, string]>(["", "", ""]);
   // Per-channel tolerance is fixed at 0.5 Da (the editing control moved out of the
@@ -213,7 +207,10 @@ export function ImagingPanel({
     active: boolean; // true once mouse moved >= 2px
   };
   const dragRef = useRef<DragState | null>(null);
+  // Committed ROI (grid coords) and the live drag rectangle (grid coords). Both
+  // are drawn as a DOM overlay so ROI selection works on EVERY image view.
   const [roiRect, setRoiRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [liveDrag, setLiveDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
   // Paint pass: rasterize the TIC into ImageData and blit at intrinsic resolution
   // (one device pixel per grid cell). Keyed on [tic, grid].
@@ -334,11 +331,7 @@ export function ImagingPanel({
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-
-    // BL-06: draw ROI rectangle overlay (committed rect from roiIndices)
-    if (roiRect) {
-      drawRoiOverlay(ctx, roiRect, grid.width, grid.height, canvas);
-    }
+    // ROI rectangle is now a DOM overlay (roiOverlay), not drawn into the canvas.
 
     if (selectedIndex == null) return;
     const key = keyForSpectrumIndex(grid, selectedIndex);
@@ -418,65 +411,130 @@ export function ImagingPanel({
     ? { width: displaySize.w, height: displaySize.h }
     : { aspectRatio: cssAspectRatio, maxWidth: "100%", maxHeight: "100%" };
 
-  function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current;
-    if (!canvas || !grid || !tic) return;
-    const hit = toGridCoord(e, canvas, grid);
-    if (!hit) {
-      setReadout({ text: "", muted: false });
-      return;
-    }
-    if (grid.presenceMask[hit.key] === 0) {
-      setReadout({
-        text: `x: ${hit.x0 + base}, y: ${hit.y0 + base} — no data`,
-        muted: true,
-      });
-      return;
-    }
-    setReadout({
-      text: `x: ${hit.x0 + base}, y: ${hit.y0 + base} · TIC: ${formatCompact(tic[hit.key])}`,
-      muted: false,
-    });
+  // Hover-readout text for a grid cell, tailored to the active view.
+  function readoutForHit(hit: { x0: number; y0: number; key: number }): {
+    text: string;
+    muted: boolean;
+  } {
+    const xy = `x: ${hit.x0 + base}, y: ${hit.y0 + base}`;
+    if (grid && grid.presenceMask[hit.key] === 0)
+      return { text: `${xy} — no data`, muted: true };
+    if (view === "ion" && ionImage)
+      return { text: `${xy} · intensity: ${formatCompact(ionImage[hit.key])}`, muted: false };
+    if (view === "overview" && overviewMode === "basepeak" && basePeakMz)
+      return { text: `${xy} · base-peak m/z: ${basePeakMz[hit.key].toFixed(2)}`, muted: false };
+    if (view === "overview" && tic)
+      return { text: `${xy} · TIC: ${formatCompact(tic[hit.key])}`, muted: false };
+    return { text: xy, muted: false };
   }
 
-  function onLeave() {
-    // Label disappears on mouse-leave (D-05).
+  // ── Unified pointer handlers for ALL image canvases (tic / base-peak / ion /
+  // multi). `e.currentTarget` is the active canvas. A plain click selects a
+  // pixel; a drag (≥2px) selects a rectangular ROI and renders its mean
+  // spectrum. The ROI rectangle is a DOM overlay (gridRectToPx), so it draws and
+  // selects identically on every view. ──────────────────────────────────────
+  function onImgMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!grid) return;
+    const canvas = e.currentTarget;
+    const hit = toGridCoord(e, canvas, grid);
+    setReadout(hit ? readoutForHit(hit) : { text: "", muted: false });
+
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.active && (Math.abs(dx) >= 2 || Math.abs(dy) >= 2)) drag.active = true;
+    if (!drag.active) return;
+    drag.currentX = e.clientX;
+    drag.currentY = e.clientY;
+    const a = toGridCoord({ clientX: drag.startX, clientY: drag.startY }, canvas, grid);
+    const b2 = toGridCoord({ clientX: drag.currentX, clientY: drag.currentY }, canvas, grid);
+    if (a && b2) setLiveDrag({ x0: a.x0, y0: a.y0, x1: b2.x0, y1: b2.y0 });
+  }
+
+  function onImgLeave() {
     setReadout({ text: "", muted: false });
+    if (dragRef.current?.active) {
+      dragRef.current = null;
+      setLiveDrag(null);
+    }
   }
 
-  // Per-canvas click handlers: each uses its own ref for hit-test (D-05).
-  function onTicClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current;
-    if (!canvas || !grid) return;
-    const hit = toGridCoord(e, canvas, grid);
-    if (!hit) return;
-    if (grid.presenceMask[hit.key] === 0) return;
-    const idx = grid.coordToSpectrumIndex.get(hit.key);
-    if (idx != null) void selectSpectrum(idx);
+  function onImgDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      active: false,
+    };
   }
 
+  function onImgUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setLiveDrag(null);
+    if (!grid) return;
+    const canvas = e.currentTarget;
 
-  // Phase 4 — ion canvas hover handler (D-06: "intensity:" label, not "TIC:").
-  function onIonMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    const canvas = ionCanvasRef.current;
-    if (!canvas || !grid || !ionImage) return;
-    const hit = toGridCoord(e, canvas, grid);
-    if (!hit) {
-      setIonReadout({ text: "", muted: false });
+    if (!drag || !drag.active) {
+      // Plain click → select pixel; clear any committed ROI.
+      clearRoi();
+      setRoiRect(null);
+      const hit = toGridCoord(e, canvas, grid);
+      if (!hit || grid.presenceMask[hit.key] === 0) return;
+      const idx = grid.coordToSpectrumIndex.get(hit.key);
+      if (idx != null) void selectSpectrum(idx);
       return;
     }
-    if (grid.presenceMask[hit.key] === 0) {
-      setIonReadout({
-        text: `x: ${hit.x0 + base}, y: ${hit.y0 + base} — no data`,
-        muted: true,
-      });
-      return;
+
+    const a = toGridCoord({ clientX: drag.startX, clientY: drag.startY }, canvas, grid);
+    const b2 = toGridCoord({ clientX: drag.currentX, clientY: drag.currentY }, canvas, grid);
+    if (!a || !b2) return;
+    const x0 = Math.min(a.x0, b2.x0);
+    const x1 = Math.max(a.x0, b2.x0);
+    const y0 = Math.min(a.y0, b2.y0);
+    const y1 = Math.max(a.y0, b2.y0);
+    const indices: number[] = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const key = y * grid.width + x;
+        if (grid.presenceMask[key] === 0) continue;
+        const idx = grid.coordToSpectrumIndex.get(key);
+        if (idx != null) indices.push(idx);
+      }
     }
-    setIonReadout({
-      text: `x: ${hit.x0 + base}, y: ${hit.y0 + base} · intensity: ${formatCompact(ionImage[hit.key])}`,
-      muted: false,
-    });
+    if (indices.length > 0) {
+      setRoiRect({ x0, y0, x1, y1 });
+      requestRoiSpectrum(indices);
+    } else {
+      clearRoi();
+      setRoiRect(null);
+    }
   }
+
+  // Map a grid-coordinate rectangle to display pixels for the DOM ROI overlay.
+  // The canvas element box == the displayed image (contain-fit sizing), so the
+  // overlay (a child of .imgframe) maps grid → canvas px directly.
+  function gridRectToPx(rect: { x0: number; y0: number; x1: number; y1: number }) {
+    if (!grid || !displaySize) return null;
+    const sx = displaySize.w / grid.width;
+    const sy = displaySize.h / grid.height;
+    const rx = Math.min(rect.x0, rect.x1);
+    const ry = Math.min(rect.y0, rect.y1);
+    const rw = Math.abs(rect.x1 - rect.x0) + 1;
+    const rh = Math.abs(rect.y1 - rect.y0) + 1;
+    return { left: rx * sx, top: ry * sy, width: rw * sx, height: rh * sy };
+  }
+
+  // The active ROI overlay (live drag takes precedence over the committed ROI).
+  const roiBox = (liveDrag ?? roiRect) ? gridRectToPx((liveDrag ?? roiRect)!) : null;
+  const roiOverlay = roiBox ? (
+    <div
+      className="roi-rect"
+      style={{ left: roiBox.left, top: roiBox.top, width: roiBox.width, height: roiBox.height }}
+    />
+  ) : null;
 
   // m/z range → center + half-window for renderIonImage
   function handleRenderIonImage() {
@@ -546,142 +604,6 @@ export function ImagingPanel({
     }
   }
 
-  // BL-06: ROI drag drawing helper
-  function drawRoiOverlay(
-    ctx: CanvasRenderingContext2D,
-    rect: { x0: number; y0: number; x1: number; y1: number },
-    _width: number,
-    _height: number,
-    _canvas: HTMLCanvasElement,
-  ) {
-    const rx = Math.min(rect.x0, rect.x1);
-    const ry = Math.min(rect.y0, rect.y1);
-    const rw = Math.abs(rect.x1 - rect.x0);
-    const rh = Math.abs(rect.y1 - rect.y0);
-    if (rw < 1 || rh < 1) return;
-    ctx.save();
-    ctx.setLineDash([2, 2]);
-    ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(rx + 0.5, ry + 0.5, rw, rh);
-    ctx.strokeStyle = "rgba(255,255,255,0.8)";
-    ctx.setLineDash([2, 2]);
-    ctx.lineDashOffset = 2;
-    ctx.strokeRect(rx + 0.5, ry + 0.5, rw, rh);
-    ctx.restore();
-  }
-
-  // BL-06: Re-blit ion image + draw live drag rect overlay
-  const repaintIonWithDrag = useCallback((rect: { x0: number; y0: number; x1: number; y1: number } | null) => {
-    const canvas = ionCanvasRef.current;
-    if (!canvas || !grid) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const rgba = ionRgbaRef.current;
-    if (rgba) {
-      const img = new ImageData(grid.width, grid.height);
-      img.data.set(rgba);
-      ctx.putImageData(img, 0, 0);
-    }
-    if (rect) {
-      drawRoiOverlay(ctx, rect, grid.width, grid.height, canvas);
-    }
-  }, [grid]);
-
-  // BL-06: Ion canvas mouse event handlers for ROI drag
-  function onIonMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    dragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      currentX: e.clientX,
-      currentY: e.clientY,
-      active: false,
-    };
-  }
-
-  function onIonMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    // Handle hover readout regardless
-    onIonMove(e);
-
-    const drag = dragRef.current;
-    if (!drag) return;
-    const dx = e.clientX - drag.startX;
-    const dy = e.clientY - drag.startY;
-    if (!drag.active && (Math.abs(dx) >= 2 || Math.abs(dy) >= 2)) {
-      drag.active = true;
-    }
-    if (!drag.active) return;
-
-    drag.currentX = e.clientX;
-    drag.currentY = e.clientY;
-
-    // Convert to grid coords for the live overlay
-    const canvas = ionCanvasRef.current;
-    if (!canvas || !grid) return;
-    const startHit = toGridCoord({ clientX: drag.startX, clientY: drag.startY }, canvas, grid);
-    const endHit = toGridCoord({ clientX: drag.currentX, clientY: drag.currentY }, canvas, grid);
-    if (startHit && endHit) {
-      repaintIonWithDrag({ x0: startHit.x0, y0: startHit.y0, x1: endHit.x0, y1: endHit.y0 });
-    }
-  }
-
-  function onIonMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
-    const drag = dragRef.current;
-    dragRef.current = null;
-
-    const canvas = ionCanvasRef.current;
-    if (!canvas || !grid) return;
-
-    if (!drag || !drag.active) {
-      // Normal click — select spectrum, clear ROI
-      clearRoi();
-      setRoiRect(null);
-      const hit = toGridCoord(e, canvas, grid);
-      if (!hit) return;
-      if (grid.presenceMask[hit.key] === 0) return;
-      const idx = grid.coordToSpectrumIndex.get(hit.key);
-      if (idx != null) void selectSpectrum(idx);
-      return;
-    }
-
-    // Drag completed — collect all spectrum indices in the rectangle
-    const startHit = toGridCoord({ clientX: drag.startX, clientY: drag.startY }, canvas, grid);
-    const endHit = toGridCoord({ clientX: drag.currentX, clientY: drag.currentY }, canvas, grid);
-    if (!startHit || !endHit) return;
-
-    const x0 = Math.min(startHit.x0, endHit.x0);
-    const x1 = Math.max(startHit.x0, endHit.x0);
-    const y0 = Math.min(startHit.y0, endHit.y0);
-    const y1 = Math.max(startHit.y0, endHit.y0);
-
-    const indices: number[] = [];
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const key = y * grid.width + x;
-        if (grid.presenceMask[key] === 0) continue;
-        const idx = grid.coordToSpectrumIndex.get(key);
-        if (idx != null) indices.push(idx);
-      }
-    }
-
-    if (indices.length > 0) {
-      setRoiRect({ x0, y0, x1, y1 });
-      requestRoiSpectrum(indices);
-    } else {
-      clearRoi();
-      setRoiRect(null);
-    }
-  }
-
-  function onIonMouseLeave() {
-    setIonReadout({ text: "", muted: false });
-    // If dragging, cancel
-    const drag = dragRef.current;
-    if (drag?.active) {
-      dragRef.current = null;
-      repaintIonWithDrag(null);
-    }
-  }
 
   const canExportTiff = (ionImage !== null || (multiChannel?.images && multiChannel.images.some(Boolean))) && grid !== null;
 
@@ -690,8 +612,8 @@ export function ImagingPanel({
   const bpHigh = stats?.mzRange ? String(Math.round(stats.mzRange[1])) : "hi";
   const showColormapCtl =
     (view === "overview" && overviewMode === "tic") || view === "ion";
-  const activeReadout =
-    view === "overview" ? readout : view === "ion" ? ionReadout : { text: "", muted: false };
+  // Single hover readout for all views (onImgMove tailors the text per view).
+  const activeReadout = readout;
   const ticHasImage = view === "overview" && overviewMode === "tic" && tic !== null && grid !== null;
   const bpHasImage = view === "overview" && overviewMode === "basepeak" && basePeakMz !== null && grid !== null;
   const ionHasImage = view === "ion" && ionImage !== null && grid !== null;
@@ -711,7 +633,6 @@ export function ImagingPanel({
             { value: "overview", label: "Overview", icon: <Grid size={13} /> },
             { value: "ion", label: "Ion Image", icon: <Image size={13} /> },
             { value: "multi", label: "Multi-channel", icon: <Layers size={13} /> },
-            { value: "settings", label: "Settings", icon: <Settings size={13} /> },
           ]}
         />
         <div className="toolbar__sep" />
@@ -760,7 +681,7 @@ export function ImagingPanel({
               disabled={!rangeValid || isRendering}
               onClick={handleRenderIonImage}
             >
-              {isRendering ? "Computing…" : "Show Ion Image"}
+              {isRendering ? "Rendering…" : "Render"}
             </Button>
           </div>
         )}
@@ -794,7 +715,7 @@ export function ImagingPanel({
               disabled={isRendering}
               onClick={handleRenderMultiChannel}
             >
-              {isRendering ? "Computing…" : "Render"}
+              {isRendering ? "Rendering…" : "Render"}
             </Button>
           </div>
         )}
@@ -865,11 +786,13 @@ export function ImagingPanel({
                 ref={canvasRef}
                 className="cross"
                 data-testid="tic-canvas"
-                onMouseMove={onMove}
-                onMouseLeave={onLeave}
-                onClick={onTicClick}
-                style={canvasSizeStyle}
+                onMouseDown={onImgDown}
+                onMouseMove={onImgMove}
+                onMouseUp={onImgUp}
+                onMouseLeave={onImgLeave}
+                style={{ ...canvasSizeStyle, userSelect: "none" }}
               />
+              {roiOverlay}
             </div>
           ))}
 
@@ -882,11 +805,13 @@ export function ImagingPanel({
                 ref={bpCanvasRef}
                 className="cross"
                 data-testid="basepeak-canvas"
-                onMouseMove={onMove}
-                onMouseLeave={onLeave}
-                onClick={onTicClick}
-                style={canvasSizeStyle}
+                onMouseDown={onImgDown}
+                onMouseMove={onImgMove}
+                onMouseUp={onImgUp}
+                onMouseLeave={onImgLeave}
+                style={{ ...canvasSizeStyle, userSelect: "none" }}
               />
+              {roiOverlay}
             </div>
           ) : (
             <div className="stage__empty">Base peak data not available</div>
@@ -904,12 +829,13 @@ export function ImagingPanel({
                 ref={ionCanvasRef}
                 className="cross"
                 data-testid="ion-canvas"
-                onMouseMove={onIonMouseMove}
-                onMouseLeave={onIonMouseLeave}
-                onMouseDown={onIonMouseDown}
-                onMouseUp={onIonMouseUp}
+                onMouseDown={onImgDown}
+                onMouseMove={onImgMove}
+                onMouseUp={onImgUp}
+                onMouseLeave={onImgLeave}
                 style={{ ...canvasSizeStyle, userSelect: "none" }}
               />
+              {roiOverlay}
             </div>
           ))}
 
@@ -919,18 +845,21 @@ export function ImagingPanel({
             <div className="imgframe">
               <canvas
                 ref={mcCanvasRef}
+                className="cross"
                 data-testid="mc-canvas"
-                style={canvasSizeStyle}
+                onMouseDown={onImgDown}
+                onMouseMove={onImgMove}
+                onMouseUp={onImgUp}
+                onMouseLeave={onImgLeave}
+                style={{ ...canvasSizeStyle, userSelect: "none" }}
               />
+              {roiOverlay}
             </div>
           ) : (
             <div className="stage__empty">
               Enter R/G/B m/z values and Render
             </div>
           ))}
-
-        {/* Settings tab — global, persisted settings */}
-        {view === "settings" && <SettingsView />}
 
         {/* Floating legend (tic / basepeak / ion — not multi) */}
         {showLegend && (
@@ -963,8 +892,9 @@ export function ImagingPanel({
           />
         )}
 
-        {/* Ion stats + ROI count, surfaced below the readout overlay */}
-        {view === "ion" && (ionImageStats || (roiIndices && roiIndices.length > 0)) && (
+        {/* Ion stats (ion view) + ROI count (ANY view), below the readout. */}
+        {((view === "ion" && ionImageStats) ||
+          (roiIndices && roiIndices.length > 0)) && (
           <div
             className="stage__readout"
             style={{ top: "auto", bottom: "var(--space-6)", right: "var(--space-6)" }}
@@ -975,7 +905,7 @@ export function ImagingPanel({
                 {roiIndices.length !== 1 ? "s" : ""} selected
               </div>
             )}
-            {ionImageStats && grid && (
+            {view === "ion" && ionImageStats && grid && (
               <div data-testid="ion-stats">
                 {ionImageStats.nonzeroCount} / {grid.filledCount} px · range{" "}
                 {formatCompact(ionImageStats.min)}–

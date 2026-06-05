@@ -554,6 +554,80 @@ async function computeIonImageFast(
   return img;
 }
 
+/**
+ * Multi-channel ion images in a SINGLE pass over spectra_data.parquet.
+ *
+ * computeIonImageFast reads the whole file once per channel; doing that 3× for an
+ * RGB overlay triples the (large, possibly network) read and made the overlay
+ * appear to hang. This reads each row group ONCE and accumulates every channel's
+ * windowed intensity together. Returns one image per input window, position-
+ * aligned with `windows` (null in → null out), so an empty channel maps to null.
+ */
+async function computeMultiIonImagesFast(
+  windows: ({ start: number; end: number } | null)[],
+): Promise<(Float32Array | null)[]> {
+  const nullResult = () => windows.map(() => null);
+  if (!activeZipStorage || !activeGrid) return nullResult();
+
+  const dataEntry = activeZipStorage.fileIndex.files.find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
+  );
+  if (!dataEntry) return nullResult();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dataBlob = await activeZipStorage.open((dataEntry as any).name);
+  if (!dataBlob) return nullResult();
+
+  const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+  const nRG = pf.metadata().numRowGroups();
+
+  // One sparse accumulator per non-null window.
+  const sums = windows.map((w) => (w ? new Map<number, number>() : null));
+
+  for (let rg = 0; rg < nRG; rg++) {
+    const rawTable = await pf.read({ rowGroups: [rg] });
+    const table = tableFromIPC(rawTable.intoIPCStream());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pointCol: any = table.getChild("point");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const siVec: any = pointCol?.getChild("spectrum_index");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mzVec: any = pointCol?.getChild("mz");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const intensVec: any = pointCol?.getChild("intensity");
+    if (!siVec || !mzVec || !intensVec) continue;
+
+    const nRows = table.numRows;
+    for (let r = 0; r < nRows; r++) {
+      const mz = Number(mzVec.get(r));
+      let si = -1;
+      let inten = 0;
+      for (let c = 0; c < windows.length; c++) {
+        const w = windows[c];
+        if (!w || mz < w.start || mz > w.end) continue;
+        if (si < 0) {
+          si = Number(siVec.get(r)); // resolve once, only if a window matched
+          inten = Number(intensVec.get(r));
+        }
+        const m = sums[c]!;
+        m.set(si, (m.get(si) ?? 0) + inten);
+      }
+    }
+  }
+
+  const grid = activeGrid;
+  return windows.map((w, c) => {
+    const m = sums[c];
+    if (!w || !m) return null;
+    const img = new Float32Array(grid.width * grid.height);
+    for (const [gridKey, spectrumIdx] of grid.coordToSpectrumIndex) {
+      const v = m.get(spectrumIdx) ?? 0;
+      if (gridKey >= 0 && gridKey < img.length) img[gridKey] = v;
+    }
+    return img;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Fast spectrum read — row-group skipping in spectra_data.parquet
 // ---------------------------------------------------------------------------
@@ -749,7 +823,39 @@ async function _computeMeanSpectrumFrom(
     if (!dataBlob) return null;
 
     const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
-    const nRG = pf.metadata().numRowGroups();
+    const meta = pf.metadata();
+    const nRG = meta.numRowGroups();
+
+    // For an ROI (filterSet), the selected spectrum indices span a bounded range;
+    // skip row groups whose spectrum_index min/max lies entirely outside it so we
+    // don't read the whole file (big win over the network).
+    let fMin = Infinity;
+    let fMax = -Infinity;
+    if (filterSet) {
+      for (const v of filterSet) {
+        if (v < fMin) fMin = v;
+        if (v > fMax) fMax = v;
+      }
+    }
+    const rgInRange = (rg: number): boolean => {
+      if (!filterSet) return true;
+      try {
+        const rgMeta = meta.rowGroup(rg);
+        for (let col = 0; col < rgMeta.numColumns(); col++) {
+          const cm = rgMeta.column(col);
+          if (!cm.columnPath().join(".").includes("spectrum_index")) continue;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const st = cm.statistics() as any;
+          if (!st) return true; // no stats → cannot skip safely
+          const mn = Number(st.minValue ?? st.min_value ?? -Infinity);
+          const mx = Number(st.maxValue ?? st.max_value ?? Infinity);
+          return mx >= fMin && mn <= fMax; // overlaps the ROI index range?
+        }
+      } catch {
+        /* fall through → read it */
+      }
+      return true;
+    };
 
     // Accumulate: mzBins (reference axis built from first spectrum seen),
     // intensitySum (sum per bin), countPerBin (number of spectra contributing).
@@ -763,6 +869,7 @@ async function _computeMeanSpectrumFrom(
     const filterArray = filterSet ? Array.from(filterSet).sort((a, b) => a - b) : null;
 
     for (let rg = 0; rg < nRG; rg++) {
+      if (!rgInRange(rg)) continue; // ROI: skip row groups outside the index range
       const rawTable = await pf.read({ rowGroups: [rg] });
       const table = tableFromIPC(rawTable.intoIPCStream());
 
@@ -1026,15 +1133,12 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
 
       case "renderMultiChannel": {
         const { channels, requestId } = msg;
-        // Run each channel's XIC in parallel — computeIonImageFast is async,
-        // and each reads from spectra_data.parquet independently.
-        const results = await Promise.all(
-          channels.map((ch) =>
-            ch
-              ? computeIonImageFast(ch.mz - ch.tolDa, ch.mz + ch.tolDa)
-              : Promise.resolve(null),
-          ),
+        // SINGLE pass over the file for all channels (was 3× full reads → slow).
+        // Position-aligned with the (possibly null-containing) channels array.
+        const windows = channels.map((ch) =>
+          ch ? { start: ch.mz - ch.tolDa, end: ch.mz + ch.tolDa } : null,
         );
+        const results = await computeMultiIonImagesFast(windows);
         const transferList: Transferable[] = results.flatMap((r) =>
           r ? [r.buffer] : [],
         );
