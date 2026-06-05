@@ -26,7 +26,20 @@ export interface OpticalImageMeta {
   affine: [number, number, number, number, number, number] | null;
   /** e.g. "assumed_full_extent" — a coarse display hint, NOT true registration. */
   registrationQuality?: string;
+  /** SHA-256 hex of the stored bytes (integrity; spec mismatch = WARNING). */
+  sha256?: string;
+  /** Declared stored size in bytes (used as a pre-decode size sanity cap). */
+  sizeBytes?: number;
 }
+
+/**
+ * Decode guards (defense-in-depth): optical images come from an untrusted index
+ * naming an arbitrary ZIP member. Cap the raw byte size and decoded pixel count
+ * so a malformed/hostile file can't exhaust browser memory. ~256 MB / 64 Mpx are
+ * generous for real microscopy overviews while bounding the worst case.
+ */
+export const MAX_OPTICAL_BYTES = 256 * 1024 * 1024;
+export const MAX_OPTICAL_PIXELS = 64 * 1024 * 1024;
 
 /** A decoded optical image (native pixel grid, RGBA row-major). */
 export interface DecodedOptical {
@@ -77,6 +90,8 @@ export function parseOpticalImages(imagingMeta: unknown): OpticalImageMeta[] {
       modality: typeof o.modality === "string" ? o.modality : undefined,
       affine,
       registrationQuality,
+      sha256: typeof o.sha256 === "string" ? o.sha256 : undefined,
+      sizeBytes: Number.isFinite(Number(o.size_bytes)) ? Number(o.size_bytes) : undefined,
     });
   }
   return out;
@@ -88,6 +103,8 @@ export function parseOpticalImages(imagingMeta: unknown): OpticalImageMeta[] {
  * Throws on an undecodable blob; callers surface a graceful "unsupported" notice.
  */
 export function decodeTiff(bytes: Uint8Array): DecodedOptical {
+  if (bytes.byteLength > MAX_OPTICAL_BYTES)
+    throw new Error(`TIFF too large: ${bytes.byteLength} bytes (cap ${MAX_OPTICAL_BYTES})`);
   // utif2 wants a standalone ArrayBuffer of exactly the image bytes. Copy into a
   // fresh buffer (not SharedArrayBuffer) so decode/decodeImage share one buffer
   // and the IFD offsets stay consistent.
@@ -95,6 +112,13 @@ export function decodeTiff(bytes: Uint8Array): DecodedOptical {
   const ifds = UTIF.decode(ab);
   if (!ifds || ifds.length === 0) throw new Error("TIFF: no IFDs");
   const ifd = ifds[0];
+  // Pre-decode pixel cap from the raw IFD tags (ImageWidth=256, ImageLength=257),
+  // which `decode` populates before the (expensive) `decodeImage` step.
+  const tag = (t: unknown): number => (Array.isArray(t) ? Number(t[0]) : Number(t));
+  const w0 = tag((ifd as Record<string, unknown>).t256);
+  const h0 = tag((ifd as Record<string, unknown>).t257);
+  if (Number.isFinite(w0) && Number.isFinite(h0) && w0 * h0 > MAX_OPTICAL_PIXELS)
+    throw new Error(`TIFF too large: ${w0}×${h0} px (cap ${MAX_OPTICAL_PIXELS})`);
   UTIF.decodeImage(ab, ifd);
   const rgbaArr = UTIF.toRGBA8(ifd); // Uint8Array, RGBA row-major
   const width = ifd.width;

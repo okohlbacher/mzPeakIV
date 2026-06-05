@@ -25,7 +25,7 @@ import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
-import { parseOpticalImages, decodeTiff } from "../imaging/optical";
+import { parseOpticalImages, decodeTiff, MAX_OPTICAL_BYTES } from "../imaging/optical";
 import { buildIonImage, computeIonImageStats } from "../compute/ionImage";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
@@ -1183,23 +1183,28 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // ADD-01: read the optical TIFF ZIP member by name, decode to RGBA, and
         // transfer the pixel buffer back. Optical images are auxiliary — a missing
         // member or undecodable blob is a soft error, never fatal to the load.
-        const { archivePath } = msg;
+        const { archivePath, gen } = msg;
         try {
           const store = activeZipStorage;
           if (!store) throw new Error("no archive open");
           // zip.js Entry is FileEntry | DirectoryEntry; only file entries have
           // getData. Narrow to a file entry exposing getData(writer).
           const entry = store.entries.find((e) => e.filename === archivePath) as
-            | { directory?: boolean; getData?: (w: unknown) => Promise<Uint8Array> }
+            | { directory?: boolean; uncompressedSize?: number; getData?: (w: unknown) => Promise<Uint8Array> }
             | undefined;
           if (!entry || entry.directory || typeof entry.getData !== "function")
             throw new Error(`ZIP member not found: ${archivePath}`);
+          // Defense-in-depth: reject an oversized member BEFORE inflating it, so
+          // a hostile index can't name a huge member and exhaust memory.
+          if (typeof entry.uncompressedSize === "number" && entry.uncompressedSize > MAX_OPTICAL_BYTES)
+            throw new Error(`optical member too large: ${entry.uncompressedSize} bytes`);
           const bytes: Uint8Array = await entry.getData(new Uint8ArrayWriter());
           const decoded = decodeTiff(bytes);
           sendTransfer(
             {
               type: "opticalImageResult",
               archivePath,
+              gen,
               width: decoded.width,
               height: decoded.height,
               rgba: decoded.rgba,
@@ -1210,6 +1215,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
           send({
             type: "opticalImageError",
             archivePath,
+            gen,
             message: err instanceof Error ? err.message : String(err),
           });
         }

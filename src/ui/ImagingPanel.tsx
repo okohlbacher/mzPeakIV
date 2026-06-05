@@ -540,6 +540,13 @@ export function ImagingPanel({
     }
   }, [view]);
 
+  // Guard: the Optical tab only exists when the file has optical images. If the
+  // active view is "optical" but they're absent (e.g. a new file loaded while on
+  // that tab), fall back to Overview so the centre pane isn't stuck (Codex r3-#1).
+  useEffect(() => {
+    if (view === "optical" && !hasOptical) setView("overview");
+  }, [view, hasOptical, setView]);
+
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;

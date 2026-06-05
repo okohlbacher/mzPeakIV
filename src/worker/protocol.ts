@@ -49,8 +49,10 @@ export type WorkerRequest =
   | { type: "renderMultiChannel"; channels: (ChannelRequest | null)[]; requestId: number }
   | { type: "meanSpectrum" }
   | { type: "roiSpectrum"; spectrumIndices: number[] }
-  // ADD-01: lazily decode an embedded optical TIFF (ZIP member) to RGBA.
-  | { type: "getOpticalImage"; archivePath: string };
+  // ADD-01: lazily decode an embedded optical TIFF (ZIP member) to RGBA. `gen`
+  // is the load generation (echoed back) so results from a previous file are
+  // dropped rather than cached into the newly-loaded file.
+  | { type: "getOpticalImage"; archivePath: string; gen: number };
 
 // ---------------------------------------------------------------------------
 // Outbound (Worker → main thread)
@@ -87,8 +89,9 @@ export type WorkerResponse =
   | { type: "multiChannelResult"; channels: (Float32Array | null)[]; requestId: number }
   | { type: "meanSpectrumResult"; spectrum: SpectrumArrays }
   // ADD-01: decoded optical image (native pixel grid, RGBA) or a decode failure.
-  | { type: "opticalImageResult"; archivePath: string; width: number; height: number; rgba: Uint8ClampedArray }
-  | { type: "opticalImageError"; archivePath: string; message: string }
+  // `gen` echoes the request's load generation for stale-result rejection.
+  | { type: "opticalImageResult"; archivePath: string; gen: number; width: number; height: number; rgba: Uint8ClampedArray }
+  | { type: "opticalImageError"; archivePath: string; gen: number; message: string }
   | {
       type: "error";
       class: ReaderErrorClass;

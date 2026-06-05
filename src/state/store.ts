@@ -231,6 +231,13 @@ let currentRequestId = 0;
 // Last multi-channel channel list sent to the Worker, so the store can pair
 // the echoed images with the originating ChannelRequest array on result.
 let currentMcChannels: (ChannelRequest | null)[] = [];
+// ADD-01: load generation — bumped ONLY on a new file load (NOT on renders, so
+// it's distinct from currentRequestId). Optical decode requests carry it and the
+// worker echoes it; results from a previous file are dropped on mismatch.
+let currentLoadGen = 0;
+// ADD-01: archive_paths with an in-flight getOpticalImage, to dedupe duplicate
+// requests (StrictMode / effect re-runs) before the first response arrives.
+const opticalInFlight = new Set<string>();
 
 // ---------------------------------------------------------------------------
 // Worker-ready handshake (fixes a worker-init race).
@@ -257,6 +264,8 @@ export const useStore = create<State & Actions>((set) => ({
 
   openUrl(url: string) {
     currentRequestId = Date.now();
+    currentLoadGen++;
+    opticalInFlight.clear();
     // Reset file state but PRESERVE the user's global settings across loads.
     set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
     postLoadWhenReady(() =>
@@ -266,6 +275,8 @@ export const useStore = create<State & Actions>((set) => ({
 
   async openFile(file: File) {
     currentRequestId = Date.now();
+    currentLoadGen++;
+    opticalInFlight.clear();
     // Reset file state but PRESERVE the user's global settings across loads.
     set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
     let buffer: ArrayBuffer;
@@ -387,11 +398,15 @@ export const useStore = create<State & Actions>((set) => ({
   },
 
   // ADD-01: request the worker decode an optical TIFF member. No-op if already
-  // decoded or a decode error was already recorded (avoid re-requesting).
+  // decoded, errored, or in flight (dedupes StrictMode / effect re-runs).
   requestOpticalImage(archivePath: string) {
     const s = useStore.getState();
     if (s.opticalDecoded[archivePath] || s.opticalErrors[archivePath]) return;
-    worker.postMessage({ type: "getOpticalImage", archivePath } satisfies WorkerRequest);
+    if (opticalInFlight.has(archivePath)) return;
+    opticalInFlight.add(archivePath);
+    worker.postMessage(
+      { type: "getOpticalImage", archivePath, gen: currentLoadGen } satisfies WorkerRequest,
+    );
   },
 
   // ADD-01: choose the displayed optical image; lazily trigger its decode.
@@ -517,7 +532,10 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       break;
 
     case "opticalImageResult": {
-      // ADD-01: cache the decoded optical pixels keyed by archive_path.
+      // ADD-01: drop results from a previous file load (stale generation) so a
+      // late decode can't pollute the newly-loaded file's cache.
+      if (msg.gen !== currentLoadGen) break;
+      opticalInFlight.delete(msg.archivePath);
       const prevOpt = useStore.getState();
       useStore.setState({
         opticalDecoded: {
@@ -529,6 +547,8 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
     }
 
     case "opticalImageError": {
+      if (msg.gen !== currentLoadGen) break;
+      opticalInFlight.delete(msg.archivePath);
       const prevOptE = useStore.getState();
       useStore.setState({
         opticalErrors: { ...prevOptE.opticalErrors, [msg.archivePath]: msg.message },
