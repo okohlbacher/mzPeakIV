@@ -162,6 +162,26 @@ All 20 v1 requirements mapped to exactly one phase. No orphans, no duplicates. (
 
 > Note: SPEC-02 (selected *m/z* window marked on spectrum) is first satisfied in Phase 3 (window = none/TIC context) and becomes meaningful once a real *m/z* window exists in Phase 4; it is owned by Phase 3 for coverage and reinforced in Phase 4. DATA-02 (fail-loud on unsupported encodings) is owned by Phase 1 (capability detection) and re-asserted through the worker path in Phase 5.
 
+## Backlog (post-v1 features)
+
+See **[BACKLOG.md](BACKLOG.md)** for the full post-Phase-5 feature queue.
+
+Features were derived from a structured review of the Cardinal v3 paper (Bemis et al. 2023) and scoped against the orientation-viewer mission.  Summary:
+
+| ID | Feature | Tier | Effort |
+|----|---------|------|--------|
+| BL-01 | TIC normalization (default on) | 1 | S |
+| BL-02 | Flexible 1/2/3 channel RGB overlay | 1 | M |
+| BL-03 | Mean / reference spectrum | 1 | M |
+| BL-04 | Gaussian 2D image smoothing | 1 | S |
+| BL-05 | Ion image export as TIFF (32-bit float) | 1 | M |
+| BL-06 | ROI rectangle → mean spectrum | 2 | L |
+| BL-07 | Contrast enhancement (histogram) | 2 | S–M |
+| BL-08 | Peak table panel (centroid) | 2 | S |
+| BL-09 | Spectrum peak click → ion image | 2 | S |
+
+Statistical / analysis features (segmentation, classification, pre-processing) are explicitly out of scope.
+
 ## Process (applies to every phase)
 
 Each phase is bracketed by a **Codex CLI adversarial review** (PROC-01 convention):
