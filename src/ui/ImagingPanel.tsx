@@ -279,7 +279,10 @@ export function ImagingPanel() {
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-  }, [ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode]);
+    // mainTab dependency: the ion canvas only mounts when its tab is active, so
+    // switching INTO the tab after ionImage already arrived must re-run this
+    // paint (deps would otherwise be unchanged and the fresh canvas stays blank).
+  }, [ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, mainTab]);
 
   // Phase 4 — ion image RING effect: re-blit then stroke the ring for the selected cell.
   // BL-01/04/07: also keyed on [ticNorm, smoothSigma, histogramMode].
@@ -321,7 +324,7 @@ export function ImagingPanel() {
     ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
-  }, [selectedIndex, ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, roiRect]);
+  }, [selectedIndex, ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, roiRect, mainTab]);
 
   // BL-02: Multi-channel canvas paint.
   useEffect(() => {
@@ -335,7 +338,8 @@ export function ImagingPanel() {
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-  }, [multiChannel, grid, tic, ticNorm]);
+    // mainTab dependency: same mount-after-data issue as the ion canvas above.
+  }, [multiChannel, grid, tic, ticNorm, mainTab]);
 
   // Grid is null until the first "Show Ion Image" click triggers lazy init.
   // We still render the controls row so the user can enter m/z and load.
