@@ -10,6 +10,9 @@
 // Orientation is already correct upstream (buildTic/buildIonImage): output offset k*4
 // maps to input values[k] — NO transpose/reorder here (C2 MANDATORY).
 import type { ImagingGrid } from "../imaging/types";
+import { gaussianSmooth } from "../compute/smooth";
+import { histogramEqualize } from "../compute/histogram";
+import type { HistogramMode } from "../compute/histogram";
 
 /**
  * Sparse / absent-pixel sentinel (UI-SPEC: #1a1a1a, RGBA 26,26,26,255). Near-black
@@ -29,6 +32,14 @@ export interface RasterizeOpts {
   percentile: number;
   /** If true, apply Math.log1p scaling before normalization. */
   logScale: boolean;
+  /** BL-01: TIC array for per-pixel normalization. Divide values[k] by tic[k] when present. */
+  tic?: Float32Array | null;
+  /** BL-01: When true AND tic is provided, apply TIC normalization. Default: true. */
+  ticNorm?: boolean;
+  /** BL-04: Gaussian smooth sigma in pixels. 0 = disabled. */
+  smoothSigma?: number;
+  /** BL-07: Histogram equalization mode. "none" = disabled. */
+  histogramMode?: HistogramMode;
 }
 
 // ── LUT stop tables ───────────────────────────────────────────────────────────
@@ -138,6 +149,11 @@ function percentileClip(values: Float32Array, presenceMask: Uint8Array, p: numbe
  * - Log scale uses Math.log1p: raw=0 → norm=0 exactly (never NaN or negative).
  * - Percentile clip is computed from PRESENT cells only.
  * - No cell reorder: out[k*4..] derives from values[k] (C2 MANDATORY — no flip/transpose).
+ *
+ * Extended pipeline (BL-01/04/07, applied in order before percentile/colormap):
+ *   1. TIC normalization (BL-01): divide present pixels by tic[k] when opts.ticNorm && opts.tic.
+ *   2. Gaussian smooth (BL-04): when opts.smoothSigma > 0.
+ *   3. Histogram equalization (BL-07): when opts.histogramMode !== "none".
  */
 export function rasterizeImage(
   values: Float32Array,
@@ -147,7 +163,33 @@ export function rasterizeImage(
   const total = grid.width * grid.height;
   const out = new Uint8ClampedArray(total * 4);
   const { presenceMask } = grid;
-  const clipMax = percentileClip(values, presenceMask, opts.percentile);
+
+  // --- BL-01: TIC normalization ---
+  // Apply before smoothing so spatial gradients from TIC are removed first.
+  const ticNorm = opts.ticNorm !== false; // default true when not specified
+  let working: Float32Array;
+  if (ticNorm && opts.tic && opts.tic.length >= total) {
+    working = values.slice(); // never mutate the input
+    for (let k = 0; k < total; k++) {
+      if (presenceMask[k] === 0) continue;
+      const t = opts.tic[k];
+      if (t > 0) working[k] = working[k] / t;
+    }
+  } else {
+    working = values;
+  }
+
+  // --- BL-04: Gaussian smoothing ---
+  if (opts.smoothSigma && opts.smoothSigma > 0) {
+    working = gaussianSmooth(working, grid.width, grid.height, presenceMask, opts.smoothSigma);
+  }
+
+  // --- BL-07: Histogram equalization ---
+  if (opts.histogramMode && opts.histogramMode !== "none") {
+    working = histogramEqualize(working, presenceMask, opts.histogramMode);
+  }
+
+  const clipMax = percentileClip(working, presenceMask, opts.percentile);
 
   // For log scale, pre-compute the denominator so we only call log1p(clipMax) once.
   const denom = opts.logScale ? Math.log1p(clipMax) : clipMax;
@@ -161,7 +203,7 @@ export function rasterizeImage(
       out[o + 3] = 255;
       continue;
     }
-    const raw = values[k];
+    const raw = working[k];
     let norm: number;
     if (opts.logScale) {
       // Math.log1p is safe: log1p(0)===0 exactly; never negative for non-negative input.
@@ -210,6 +252,76 @@ export function rasterizeImage(
  */
 export function rasterizeTic(tic: Float32Array, grid: ImagingGrid): Uint8ClampedArray {
   return rasterizeImage(tic, grid, { colormap: "viridis", percentile: 0.99, logScale: false });
+}
+
+/**
+ * Render an RGB multi-channel overlay (BL-02).
+ *
+ * Each of the up to 3 channels (R/G/B) is an optional Float32Array of per-pixel
+ * intensities. Absent channels (null) contribute 0. TIC normalization is applied
+ * per-channel when ticNorm is true.
+ *
+ * @param channels  Array of 3 optional ion-image Float32Arrays (R, G, B order).
+ * @param grid      ImagingGrid — presence mask and dimensions.
+ * @param tic       TIC raster for normalization; null if unavailable.
+ * @param ticNorm   Whether to apply TIC normalization.
+ * @returns RGBA Uint8ClampedArray of length grid.width * grid.height * 4.
+ */
+export function rasterizeMultiChannel(
+  channels: (Float32Array | null)[],
+  grid: ImagingGrid,
+  tic: Float32Array | null,
+  ticNorm: boolean,
+): Uint8ClampedArray {
+  const total = grid.width * grid.height;
+  const out = new Uint8ClampedArray(total * 4);
+  const { presenceMask } = grid;
+
+  // Normalize each channel: optionally divide by TIC, then find the per-channel max.
+  const normalized: (Float32Array | null)[] = channels.map((ch) => {
+    if (!ch || ch.length < total) return null;
+    const norm = ticNorm && tic && tic.length >= total ? ch.slice() : ch;
+    if (ticNorm && tic && tic.length >= total) {
+      for (let k = 0; k < total; k++) {
+        if (presenceMask[k] === 0) continue;
+        const t = tic[k];
+        if (t > 0) (norm as Float32Array)[k] = ch[k] / t;
+      }
+    }
+    return norm instanceof Float32Array ? norm : ch;
+  });
+
+  // Per-channel maximum over present pixels (for normalization to [0,1]).
+  const maxVals = normalized.map((ch) => {
+    if (!ch) return 0;
+    let m = 0;
+    for (let k = 0; k < total; k++) {
+      if (presenceMask[k] !== 0 && ch[k] > m) m = ch[k];
+    }
+    return m;
+  });
+
+  for (let k = 0; k < total; k++) {
+    const o = k * 4;
+    if (presenceMask[k] === 0) {
+      out[o] = SENTINEL[0];
+      out[o + 1] = SENTINEL[1];
+      out[o + 2] = SENTINEL[2];
+      out[o + 3] = 255;
+      continue;
+    }
+    // Map each channel to [0, 255].
+    const toU8 = (ch: Float32Array | null, maxVal: number): number => {
+      if (!ch || maxVal === 0) return 0;
+      return Math.round(Math.min(Math.max(ch[k] / maxVal, 0), 1) * 255);
+    };
+    out[o] = toU8(normalized[0] ?? null, maxVals[0]);
+    out[o + 1] = toU8(normalized[1] ?? null, maxVals[1]);
+    out[o + 2] = toU8(normalized[2] ?? null, maxVals[2]);
+    out[o + 3] = 255;
+  }
+
+  return out;
 }
 
 /**

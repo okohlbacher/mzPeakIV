@@ -17,7 +17,10 @@ import type {
   WorkerResponse,
   LoadResult,
   NonImagingResult,
+  ChannelRequest,
+  MultiChannelState,
 } from "../worker/protocol";
+import type { HistogramMode } from "../compute/histogram";
 
 /** Structured store error (R-03b). */
 export type StoreError = {
@@ -55,6 +58,18 @@ type State = {
   percentile: number;
   /** Phase 5: true while a Worker renderIonImage request is in flight (D-02/D-03). */
   isRendering: boolean;
+  /** BL-01: TIC normalization — divide each pixel's intensity by its TIC value. */
+  ticNorm: boolean;
+  /** BL-04: Gaussian smooth sigma in pixels (0 = disabled). */
+  smoothSigma: number;
+  /** BL-07: Histogram equalization mode. */
+  histogramMode: HistogramMode;
+  /** BL-02: Multi-channel overlay state (RGB overlay of three m/z windows). */
+  multiChannel: MultiChannelState | null;
+  /** BL-03: Mean spectrum across all (or sampled) pixels. */
+  meanSpectrum: SpectrumArrays | null;
+  /** BL-06: Selected pixel indices for ROI spectrum. */
+  roiIndices: number[] | null;
 };
 
 type Actions = {
@@ -64,6 +79,17 @@ type Actions = {
   // Phase 4 actions (IMAGE-02/IMAGE-03).
   renderIonImage: (mz: number, tolDa: number) => void;
   setColormapSettings: (colormap: Colormap, scale: "linear" | "log", percentile: number) => void;
+  // BL-01/BL-04/BL-07: render modifier toggles.
+  setTicNorm: (enabled: boolean) => void;
+  setSmoothSigma: (sigma: number) => void;
+  setHistogramMode: (mode: HistogramMode) => void;
+  // BL-02: multi-channel overlay.
+  renderMultiChannel: (channels: (ChannelRequest | null)[]) => void;
+  // BL-03: mean spectrum across all pixels.
+  requestMeanSpectrum: () => void;
+  // BL-06: ROI spectrum for selected pixels.
+  requestRoiSpectrum: (spectrumIndices: number[]) => void;
+  clearRoi: () => void;
 };
 
 const initialState: State = {
@@ -88,6 +114,13 @@ const initialState: State = {
   percentile: 0.99,
   // Phase 5 default.
   isRendering: false,
+  // BL defaults.
+  ticNorm: true,
+  smoothSigma: 0,
+  histogramMode: "none",
+  multiChannel: null,
+  meanSpectrum: null,
+  roiIndices: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -106,6 +139,9 @@ let currentMzWindow: { mz: number; tolDa: number } | null = null;
 // Incremented on each renderIonImage call; Worker echoes requestId in the
 // response; mismatched IDs are silently discarded on the main thread.
 let currentRequestId = 0;
+// Last multi-channel channel list sent to the Worker, so the store can pair
+// the echoed images with the originating ChannelRequest array on result.
+let currentMcChannels: (ChannelRequest | null)[] = [];
 
 export const useStore = create<State & Actions>((set) => ({
   ...initialState,
@@ -175,6 +211,47 @@ export const useStore = create<State & Actions>((set) => ({
   // ImagingPanel re-rasterizes the cached ionImage on colormap/scale change (D-02/SC-5).
   setColormapSettings(colormap: Colormap, scale: "linear" | "log", percentile: number) {
     set({ colormap, scale, percentile });
+  },
+
+  // BL-01: Toggle TIC normalization.
+  setTicNorm(enabled: boolean) {
+    set({ ticNorm: enabled });
+  },
+
+  // BL-04: Update Gaussian smooth sigma.
+  setSmoothSigma(sigma: number) {
+    set({ smoothSigma: sigma });
+  },
+
+  // BL-07: Update histogram equalization mode.
+  setHistogramMode(mode: HistogramMode) {
+    set({ histogramMode: mode });
+  },
+
+  // BL-02: Render an RGB multi-channel overlay.
+  renderMultiChannel(channels: (ChannelRequest | null)[]) {
+    const validChannels = channels.filter((ch): ch is ChannelRequest => ch !== null);
+    if (validChannels.length === 0) return;
+    currentMcChannels = channels;
+    const rid = ++currentRequestId;
+    worker.postMessage(
+      { type: "renderMultiChannel", channels: validChannels, requestId: rid } satisfies WorkerRequest,
+    );
+  },
+
+  // BL-03: Request mean spectrum across all pixels.
+  requestMeanSpectrum() {
+    worker.postMessage({ type: "meanSpectrum" } satisfies WorkerRequest);
+  },
+
+  // BL-06: Request mean spectrum for a selected ROI.
+  requestRoiSpectrum(spectrumIndices: number[]) {
+    set({ roiIndices: spectrumIndices });
+    worker.postMessage({ type: "roiSpectrum", spectrumIndices } satisfies WorkerRequest);
+  },
+
+  clearRoi() {
+    set({ roiIndices: null });
   },
 }));
 
@@ -259,6 +336,21 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         selectedIndex: msg.spectrum.index,
         selectedSpectrum: msg.spectrum,
       });
+      break;
+
+    case "multiChannelResult":
+      // Stale-response guard: reuse currentRequestId (shared counter).
+      if (msg.requestId !== currentRequestId) break;
+      useStore.setState({
+        multiChannel: {
+          channels: currentMcChannels,
+          images: msg.channels,
+        },
+      });
+      break;
+
+    case "meanSpectrumResult":
+      useStore.setState({ meanSpectrum: msg.spectrum });
       break;
 
     case "error":

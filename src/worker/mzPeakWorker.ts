@@ -666,6 +666,185 @@ async function readFastSpectrum(index: number): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Mean spectrum helpers — BL-03 and BL-06
+// ---------------------------------------------------------------------------
+
+/**
+ * Import SpectrumArrays type locally (already in scope via reader/types import path).
+ * We read spectra_data.parquet row groups and average across a sample of spectra.
+ *
+ * Strategy:
+ *  - Open spectra_data.parquet (the same 208 KB file used by XIC and fast-spectrum).
+ *  - Walk ALL row groups, collecting mz/intensity pairs into a per-bin map.
+ *  - Use the first spectrum's mz values as a reference grid (centroid data only).
+ *  - For each subsequent spectrum, bin each (mz, intensity) pair into the closest
+ *    reference mz bin (within ±0.5 Da).
+ *  - Return the mean intensity per bin across all sampled spectra.
+ *
+ * To keep this fast (no full 553 MB metadata read), we sample uniformly from the
+ * spectra present in spectra_data.parquet (up to MAX_SAMPLES).
+ */
+async function computeMeanSpectrum(): Promise<{ index: number; id: string; mz: Float64Array; intensity: Float32Array } | null> {
+  if (!activeZipStorage || !activeGrid) return null;
+  return _computeMeanSpectrumFrom(null);
+}
+
+/**
+ * Compute the mean spectrum for a specified subset of spectrum indices (BL-06).
+ * Caps at 100 indices for performance; sorted to minimize row-group jumps.
+ */
+async function computeRoiMeanSpectrum(
+  indices: number[],
+): Promise<{ index: number; id: string; mz: Float64Array; intensity: Float32Array } | null> {
+  if (!activeZipStorage) return null;
+  const capped = indices.slice(0, 100).sort((a, b) => a - b);
+  return _computeMeanSpectrumFrom(new Set(capped));
+}
+
+/**
+ * Shared implementation: if `filterSet` is null → average all spectra (sampled);
+ * if `filterSet` is a Set → average only those spectrum indices.
+ */
+async function _computeMeanSpectrumFrom(
+  filterSet: Set<number> | null,
+): Promise<{ index: number; id: string; mz: Float64Array; intensity: Float32Array } | null> {
+  const MAX_SAMPLES = 300;
+  try {
+    const dataEntry = activeZipStorage!.fileIndex.files.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
+    );
+    if (!dataEntry) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dataBlob = await activeZipStorage!.open((dataEntry as any).name);
+    if (!dataBlob) return null;
+
+    const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+    const nRG = pf.metadata().numRowGroups();
+
+    // Accumulate: mzBins (reference axis built from first spectrum seen),
+    // intensitySum (sum per bin), countPerBin (number of spectra contributing).
+    let refMz: Float64Array | null = null;
+    const intensitySum: Map<number, number> = new Map(); // binIdx → sum
+    const countPerBin: Map<number, number> = new Map();  // binIdx → count
+    let sampledSpectra = 0;
+
+    // Determine which spectrum_indices to include when filterSet is non-null.
+    // For the global mean (filterSet === null), we'll subsample uniformly below.
+    const filterArray = filterSet ? Array.from(filterSet).sort((a, b) => a - b) : null;
+
+    for (let rg = 0; rg < nRG; rg++) {
+      const rawTable = await pf.read({ rowGroups: [rg] });
+      const table = tableFromIPC(rawTable.intoIPCStream());
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pointCol: any = table.getChild("point");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const siVec: any = pointCol?.getChild("spectrum_index");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mzVec: any = pointCol?.getChild("mz");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const intensVec: any = pointCol?.getChild("intensity");
+
+      if (!siVec || !mzVec || !intensVec) continue;
+
+      const nRows = table.numRows;
+
+      // Group rows by spectrum_index within this row group.
+      const spectrumRows = new Map<number, { mzs: number[]; ins: number[] }>();
+      for (let r = 0; r < nRows; r++) {
+        const si = Number(siVec.get(r));
+        // Filter check.
+        if (filterArray !== null) {
+          // Only include if in the filter set.
+          if (!filterSet!.has(si)) continue;
+        }
+        if (!spectrumRows.has(si)) spectrumRows.set(si, { mzs: [], ins: [] });
+        const entry = spectrumRows.get(si)!;
+        entry.mzs.push(Number(mzVec.get(r)));
+        entry.ins.push(Number(intensVec.get(r)));
+      }
+
+      // For global mean: subsample spectrum indices uniformly.
+      let siList = Array.from(spectrumRows.keys());
+      if (filterArray === null && siList.length > 0) {
+        const remaining = MAX_SAMPLES - sampledSpectra;
+        if (remaining <= 0) break;
+        if (siList.length > remaining) {
+          // Take evenly spaced subset.
+          const step = siList.length / remaining;
+          siList = Array.from({ length: remaining }, (_, i) => siList[Math.floor(i * step)]);
+        }
+      }
+
+      for (const si of siList) {
+        const entry = spectrumRows.get(si);
+        if (!entry) continue;
+        const { mzs, ins } = entry;
+        if (mzs.length === 0) continue;
+
+        // Build reference mz axis from the first spectrum encountered.
+        if (refMz === null) {
+          const sorted = mzs.map((m, i) => ({ m, v: ins[i] })).sort((a, b) => a.m - b.m);
+          refMz = new Float64Array(sorted.map((s) => s.m));
+          for (let bi = 0; bi < refMz.length; bi++) {
+            intensitySum.set(bi, sorted[bi].v);
+            countPerBin.set(bi, 1);
+          }
+          sampledSpectra++;
+          continue;
+        }
+
+        // Bin each (mz, intensity) pair into the closest reference bin (±0.5 Da).
+        for (let j = 0; j < mzs.length; j++) {
+          const mzVal = mzs[j];
+          const intVal = ins[j];
+          // Binary search for the closest reference mz.
+          let lo = 0;
+          let hi = refMz.length - 1;
+          while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (refMz[mid] < mzVal) lo = mid + 1;
+            else hi = mid;
+          }
+          // lo is the first index with refMz[lo] >= mzVal; check lo-1 too.
+          const bestIdx =
+            lo > 0 && Math.abs(refMz[lo - 1] - mzVal) < Math.abs(refMz[lo] - mzVal)
+              ? lo - 1
+              : lo;
+          if (Math.abs(refMz[bestIdx] - mzVal) <= 0.5) {
+            intensitySum.set(bestIdx, (intensitySum.get(bestIdx) ?? 0) + intVal);
+            countPerBin.set(bestIdx, (countPerBin.get(bestIdx) ?? 0) + 1);
+          }
+        }
+        sampledSpectra++;
+        if (filterArray === null && sampledSpectra >= MAX_SAMPLES) break;
+      }
+      if (filterArray === null && sampledSpectra >= MAX_SAMPLES) break;
+    }
+
+    if (refMz === null || sampledSpectra === 0) return null;
+
+    // Build output: mean intensity per reference mz bin.
+    const outIntensity = new Float32Array(refMz.length);
+    for (let bi = 0; bi < refMz.length; bi++) {
+      const cnt = countPerBin.get(bi) ?? 0;
+      outIntensity[bi] = cnt > 0 ? (intensitySum.get(bi) ?? 0) / cnt : 0;
+    }
+
+    return {
+      index: -1,
+      id: filterSet ? `roi-mean(${filterSet.size})` : "mean",
+      mz: refMz,
+      intensity: outIntensity,
+    };
+  } catch (e) {
+    console.warn("[mzPeakWorker] _computeMeanSpectrumFrom FAILED:", e);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // selectSpectrum helper — shared by both load path and explicit selectSpectrum msg
 // ---------------------------------------------------------------------------
 
@@ -813,6 +992,50 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
           }
         }
         await runSelectSpectrum(msg.index);
+        break;
+      }
+
+      case "renderMultiChannel": {
+        const { channels, requestId } = msg;
+        // Run each channel's XIC in parallel — computeIonImageFast is async,
+        // and each reads from spectra_data.parquet independently.
+        const results = await Promise.all(
+          channels.map((ch) =>
+            ch
+              ? computeIonImageFast(ch.mz - ch.tolDa, ch.mz + ch.tolDa)
+              : Promise.resolve(null),
+          ),
+        );
+        const transferList: Transferable[] = results.flatMap((r) =>
+          r ? [r.buffer] : [],
+        );
+        sendTransfer(
+          { type: "multiChannelResult", channels: results, requestId },
+          transferList,
+        );
+        break;
+      }
+
+      case "meanSpectrum": {
+        const result = await computeMeanSpectrum();
+        if (result) {
+          sendTransfer(
+            { type: "meanSpectrumResult", spectrum: result },
+            [result.mz.buffer, result.intensity.buffer],
+          );
+        }
+        break;
+      }
+
+      case "roiSpectrum": {
+        const { spectrumIndices } = msg;
+        const result = await computeRoiMeanSpectrum(spectrumIndices);
+        if (result) {
+          sendTransfer(
+            { type: "meanSpectrumResult", spectrum: result },
+            [result.mz.buffer, result.intensity.buffer],
+          );
+        }
         break;
       }
     }

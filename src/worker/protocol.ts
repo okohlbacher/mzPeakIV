@@ -16,6 +16,14 @@ import type { ImagingGrid } from "../imaging/types";
 // Inbound (main thread → Worker)
 // ---------------------------------------------------------------------------
 
+/** One channel in a multi-channel overlay request (BL-02). */
+export type ChannelRequest = {
+  /** m/z center in Da */
+  mz: number;
+  /** half-window in Da */
+  tolDa: number;
+};
+
 /**
  * Discriminated union of all messages the main thread sends to the Worker.
  *
@@ -23,15 +31,21 @@ import type { ImagingGrid } from "../imaging/types";
  *   (ZIP → manifest → metadata → grid → TIC → result)
  * - renderIonImage: extract XIC for a given m/z window and return a Float32Array
  * - selectSpectrum: retrieve the mz/intensity arrays for one spectrum by index
+ * - renderMultiChannel: extract XIC for up to 3 channels simultaneously (BL-02)
+ * - meanSpectrum: compute the mean spectrum across all pixels (BL-03)
+ * - roiSpectrum: compute the mean spectrum for a subset of pixel indices (BL-06)
  *
- * requestId on renderIonImage enables stale-response cancellation on the main
- * thread (Pattern 5 from RESEARCH.md — generation counter).
+ * requestId on renderIonImage / renderMultiChannel enables stale-response
+ * cancellation on the main thread (Pattern 5 from RESEARCH.md — generation counter).
  */
 export type WorkerRequest =
   | { type: "loadUrl"; url: string }
   | { type: "loadFile"; bytes: ArrayBuffer; name: string }
   | { type: "renderIonImage"; mz: number; tolDa: number; requestId: number }
-  | { type: "selectSpectrum"; index: number };
+  | { type: "selectSpectrum"; index: number }
+  | { type: "renderMultiChannel"; channels: ChannelRequest[]; requestId: number }
+  | { type: "meanSpectrum" }
+  | { type: "roiSpectrum"; spectrumIndices: number[] };
 
 // ---------------------------------------------------------------------------
 // Outbound (Worker → main thread)
@@ -61,6 +75,8 @@ export type WorkerResponse =
       requestId: number;
     }
   | { type: "spectrumResult"; spectrum: SpectrumArrays }
+  | { type: "multiChannelResult"; channels: (Float32Array | null)[]; requestId: number }
+  | { type: "meanSpectrumResult"; spectrum: SpectrumArrays }
   | {
       type: "error";
       class: ReaderErrorClass;
@@ -121,6 +137,12 @@ export type NonImagingResult = {
   fileMeta: FileMeta | null;
   stats: FileStats | null;
   capabilities: Capabilities;
+};
+
+/** State for a multi-channel overlay (BL-02). */
+export type MultiChannelState = {
+  channels: (ChannelRequest | null)[];  // length 3, null = channel disabled
+  images: (Float32Array | null)[];      // length 3
 };
 
 /**
