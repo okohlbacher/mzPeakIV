@@ -8,3 +8,4 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 public/HR2MSI.mzpeak
+/mzPeak Design System.zip

@@ -1,0 +1,81 @@
+- **BLOCKER:** Phase 4 likely orphans controls. P4 moves colormap into the toolbar, but scale, percentile, TIC normalization, smoothing, and contrast are only placed in the settings popover in P6. Today those controls exist in ImagingPanel and directly affect rendering. Removing them in P4 means two phases without visible access to shipped rendering controls.
+
+- **BLOCKER:** The hidden `stage` sentinel plan is not robust enough. Current exact text mapping lives inside App at [App.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/App.tsx:38), while ProgressBar has its own mapping. The roadmap says “preserve” but does not require a shared label source or all-stage mounting. A shell refactor can easily hide it in a conditional loader/body branch or drift from ProgressBar text. It must be mounted once, outside conditional views, for `idle`, loading, `ready`, `no-imaging`, and `error`.
+
+- **MAJOR:** uPlot sizing is hand-waved. Current chart uses `height: 150` and only `window.resize` at [SpectrumPanel.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/SpectrumPanel.tsx:93). A 188px dock with header, padding, peak table, and axes will not reliably leave 150px. “Reuse/adapt existing resize-observer” is wrong because there is no existing ResizeObserver here. Require `ResizeObserver`, measured dock plot area height, min-height behavior, and tests/screenshot checks for nonzero canvas dimensions.
+
+- **MAJOR:** Phase 2 “slot existing panels unchanged” is not actually isolated. Moving `SpectrumPanel` into a bottom dock before adapting its fixed height and border model can break the skeleton assertion that `spectrum-plot canvas` has nonzero dimensions. Moving ImagingPanel into `.stage` with `overflow:hidden` can clip current full-width canvases and controls before P4.
+
+- **MAJOR:** CSS cascade risk is understated. `base.css` changes `body`, all headings, global `box-sizing`, anchors, and `:focus-visible`. Existing components rely on inline styles but not for every inherited font, line-height, focus, table, button, input, and heading behavior. The claim “inline-styled and win specificity” is false for inherited and pseudo-class styles.
+
+- **MAJOR:** Font plan is incomplete. The handoff `styles.css` imports `tokens/fonts.css`, and that file contains a Google `@import`. The roadmap says remove it and use `@fontsource`, but does not specify exact imports for Sans/Mono weights, italic 400, CSS import order, or how to prevent accidental CDN reintroduction when copying design-system files. This can silently ship Google Fonts despite the stated Pages/offline constraint.
+
+- **MAJOR:** Loader migration risks breaking the default URL contract. Current default is `import.meta.env.BASE_URL + "static/small.mzpeak"` in [FileLoader.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/FileLoader.tsx:6). P5 mentions preserving default URL behavior but not the exact `BASE_URL` requirement. Any hardcoded `/static/small.mzpeak` or relative `static/small.mzpeak` will break GitHub Pages base `/mzPeakIV/`.
+
+- **MAJOR:** Error and no-imaging states are missing from the shell design. The roadmap calls out `ErrorBanner` only as a testid and mentions no-imaging only indirectly. Current App has separate `stage === "error"` and `stage === "no-imaging"` branches at [App.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/App.tsx:65). The new shell needs explicit placement for error banner, non-imaging spectrum-only mode, empty stage messaging, and whether the dock/rail/statusbar stay visible.
+
+- **MAJOR:** StrictMode/ref timing is not addressed. React 19 dev StrictMode will double-run mount effects. The roadmap does not require cleanup checks for uPlot event listeners, ResizeObserver disconnects, matchMedia listeners, outside-click popover listeners, or canvas paint effects after conditional remount.
+
+- **MAJOR:** Accessibility is largely missing. New segmented controls, icon buttons, settings popover, collapsible panels, rail overlay, drag/drop zone, and toolbar scrolling need keyboard behavior, labels, focus trapping/return where appropriate, and `aria-selected`/`aria-expanded` semantics. “aria per prompt notes” in P1 is not enough once composed into App.
+
+- **MINOR:** Asset pathing is underspecified. Copying `openms-logo.png` and `openms-mark.svg` to `public/` works only if referenced through `import.meta.env.BASE_URL` or root-aware Vite handling. Favicon under project-page base needs `href={`${BASE_URL}openms-mark.svg`}` or equivalent.
+
+- **MINOR:** “Phases 0–1 are no risk” is not defensible. P0 changes global CSS and font loading. P1 adds dependencies and tests. Neither is behavior-free in a Vite app with global CSS imports and production bundling.
+
+**verdict: reject**
+
+Must-fix items:
+
+1. Require full e2e at P4, including imaging canvases, view switching, ROI, pixel click, and spectrum update.
+2. Specify the lifted `view` dependency/ref strategy that preserves the `mainTab` canvas repaint fix.
+3. Keep all current rendering controls reachable in P4, or move settings popover into P4.
+4. Define a single shared stage-label mapping and require the hidden `stage` sentinel to be always mounted.
+5. Replace SpectrumPanel’s window-resize/hardcoded-height plan with ResizeObserver and measured dock plot sizing.
+6. Add explicit shell behavior for error, loading, ready, and no-imaging states.
+7. Tighten font/CSS adoption steps so Google `@import` cannot survive and global cascade is tested.
+8. Preserve `import.meta.env.BASE_URL` for demo URL, favicon, and public assets under GitHub Pages.
+tokens used
+76.302
+**Findings**
+
+- **BLOCKER:** Phase 4 is “highest risk” but e2e is not required there. Roadmap line 71 runs Playwright at P2, P3, P5, P6, skipping the phase that moves canvases, testids, click handlers, and view state. That invalidates line 14’s “every phase green” claim. Add e2e at P4 with imaging fixture coverage for `tic-canvas`, `ion-canvas`, `mc-canvas`, pixel click, ROI drag, and tab/view switching.
+
+- **BLOCKER:** The `mainTab` fix is underspecified. Current blank-canvas prevention depends on `mainTab` in ion and multi paint effects at [ImagingPanel.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/ImagingPanel.tsx:262) and [ImagingPanel.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/ImagingPanel.tsx:330). The roadmap says “preserve” it, but lifting to App changes enum names, ownership, conditional mounting, and dependency arrays. It needs an explicit rule: every paint/re-blit effect for conditionally mounted canvases must depend on the lifted `view`, or canvases must stay mounted and hidden.
+
+- **BLOCKER:** Phase 4 likely orphans controls. P4 moves colormap into the toolbar, but scale, percentile, TIC normalization, smoothing, and contrast are only placed in the settings popover in P6. Today those controls exist in ImagingPanel and directly affect rendering. Removing them in P4 means two phases without visible access to shipped rendering controls.
+
+- **BLOCKER:** The hidden `stage` sentinel plan is not robust enough. Current exact text mapping lives inside App at [App.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/App.tsx:38), while ProgressBar has its own mapping. The roadmap says “preserve” but does not require a shared label source or all-stage mounting. A shell refactor can easily hide it in a conditional loader/body branch or drift from ProgressBar text. It must be mounted once, outside conditional views, for `idle`, loading, `ready`, `no-imaging`, and `error`.
+
+- **MAJOR:** uPlot sizing is hand-waved. Current chart uses `height: 150` and only `window.resize` at [SpectrumPanel.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/SpectrumPanel.tsx:93). A 188px dock with header, padding, peak table, and axes will not reliably leave 150px. “Reuse/adapt existing resize-observer” is wrong because there is no existing ResizeObserver here. Require `ResizeObserver`, measured dock plot area height, min-height behavior, and tests/screenshot checks for nonzero canvas dimensions.
+
+- **MAJOR:** Phase 2 “slot existing panels unchanged” is not actually isolated. Moving `SpectrumPanel` into a bottom dock before adapting its fixed height and border model can break the skeleton assertion that `spectrum-plot canvas` has nonzero dimensions. Moving ImagingPanel into `.stage` with `overflow:hidden` can clip current full-width canvases and controls before P4.
+
+- **MAJOR:** CSS cascade risk is understated. `base.css` changes `body`, all headings, global `box-sizing`, anchors, and `:focus-visible`. Existing components rely on inline styles but not for every inherited font, line-height, focus, table, button, input, and heading behavior. The claim “inline-styled and win specificity” is false for inherited and pseudo-class styles.
+
+- **MAJOR:** Font plan is incomplete. The handoff `styles.css` imports `tokens/fonts.css`, and that file contains a Google `@import`. The roadmap says remove it and use `@fontsource`, but does not specify exact imports for Sans/Mono weights, italic 400, CSS import order, or how to prevent accidental CDN reintroduction when copying design-system files. This can silently ship Google Fonts despite the stated Pages/offline constraint.
+
+- **MAJOR:** Loader migration risks breaking the default URL contract. Current default is `import.meta.env.BASE_URL + "static/small.mzpeak"` in [FileLoader.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/FileLoader.tsx:6). P5 mentions preserving default URL behavior but not the exact `BASE_URL` requirement. Any hardcoded `/static/small.mzpeak` or relative `static/small.mzpeak` will break GitHub Pages base `/mzPeakIV/`.
+
+- **MAJOR:** Error and no-imaging states are missing from the shell design. The roadmap calls out `ErrorBanner` only as a testid and mentions no-imaging only indirectly. Current App has separate `stage === "error"` and `stage === "no-imaging"` branches at [App.tsx](/Users/kohlbach/Claude/mzPeakIV/src/ui/App.tsx:65). The new shell needs explicit placement for error banner, non-imaging spectrum-only mode, empty stage messaging, and whether the dock/rail/statusbar stay visible.
+
+- **MAJOR:** StrictMode/ref timing is not addressed. React 19 dev StrictMode will double-run mount effects. The roadmap does not require cleanup checks for uPlot event listeners, ResizeObserver disconnects, matchMedia listeners, outside-click popover listeners, or canvas paint effects after conditional remount.
+
+- **MAJOR:** Accessibility is largely missing. New segmented controls, icon buttons, settings popover, collapsible panels, rail overlay, drag/drop zone, and toolbar scrolling need keyboard behavior, labels, focus trapping/return where appropriate, and `aria-selected`/`aria-expanded` semantics. “aria per prompt notes” in P1 is not enough once composed into App.
+
+- **MINOR:** Asset pathing is underspecified. Copying `openms-logo.png` and `openms-mark.svg` to `public/` works only if referenced through `import.meta.env.BASE_URL` or root-aware Vite handling. Favicon under project-page base needs `href={`${BASE_URL}openms-mark.svg`}` or equivalent.
+
+- **MINOR:** “Phases 0–1 are no risk” is not defensible. P0 changes global CSS and font loading. P1 adds dependencies and tests. Neither is behavior-free in a Vite app with global CSS imports and production bundling.
+
+**verdict: reject**
+
+Must-fix items:
+
+1. Require full e2e at P4, including imaging canvases, view switching, ROI, pixel click, and spectrum update.
+2. Specify the lifted `view` dependency/ref strategy that preserves the `mainTab` canvas repaint fix.
+3. Keep all current rendering controls reachable in P4, or move settings popover into P4.
+4. Define a single shared stage-label mapping and require the hidden `stage` sentinel to be always mounted.
+5. Replace SpectrumPanel’s window-resize/hardcoded-height plan with ResizeObserver and measured dock plot sizing.
+6. Add explicit shell behavior for error, loading, ready, and no-imaging states.
+7. Tighten font/CSS adoption steps so Google `@import` cannot survive and global cascade is tested.
+8. Preserve `import.meta.env.BASE_URL` for demo URL, favicon, and public assets under GitHub Pages.
+CODEX_EXIT: 0
