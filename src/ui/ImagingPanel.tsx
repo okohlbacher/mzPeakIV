@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Grid, Image, Layers, Download } from "lucide-react";
+import { Grid, Image, Layers, Download, Settings } from "lucide-react";
 
 import { useStore } from "../state/store";
 import {
@@ -8,6 +8,8 @@ import {
   NumberField,
   ColormapScale,
 } from "./ds";
+import { SettingsView } from "./SettingsView";
+import type { View } from "./viewTypes";
 import {
   rasterizeTic,
   rasterizeImage,
@@ -107,8 +109,8 @@ export function ImagingPanel({
   overviewMode,
   setOverviewMode,
 }: {
-  view: "overview" | "ion" | "multi";
-  setView: (v: "overview" | "ion" | "multi") => void;
+  view: View;
+  setView: (v: View) => void;
   overviewMode: "tic" | "basepeak";
   setOverviewMode: (m: "tic" | "basepeak") => void;
 }) {
@@ -181,6 +183,15 @@ export function ImagingPanel({
     if (!mzEnd) setMzEnd(hi.toFixed(2));
     setAutoFilled(true);
   }, [stats?.mzRange, autoFilled, mzStart, mzEnd]);
+
+  // Keep the m/z range inputs in sync with the rendered window, so a peak click
+  // in the spectrum (which calls renderIonImage with mz ± global Δ and switches
+  // to this view) is reflected in the toolbar. Keyed on mzWindow only.
+  useEffect(() => {
+    if (!mzWindow) return;
+    setMzStart((mzWindow.mz - mzWindow.tolDa).toFixed(4));
+    setMzEnd((mzWindow.mz + mzWindow.tolDa).toFixed(4));
+  }, [mzWindow]);
 
   const [ionReadout, setIonReadout] = useState<{ text: string; muted: boolean }>({
     text: "",
@@ -695,11 +706,12 @@ export function ImagingPanel({
         <SegmentedControl
           ariaLabel="View"
           value={view}
-          onChange={(v) => setView(v as "overview" | "ion" | "multi")}
+          onChange={(v) => setView(v as View)}
           options={[
             { value: "overview", label: "Overview", icon: <Grid size={13} /> },
             { value: "ion", label: "Ion Image", icon: <Image size={13} /> },
             { value: "multi", label: "Multi-channel", icon: <Layers size={13} /> },
+            { value: "settings", label: "Settings", icon: <Settings size={13} /> },
           ]}
         />
         <div className="toolbar__sep" />
@@ -916,6 +928,9 @@ export function ImagingPanel({
               Enter R/G/B m/z values and Render
             </div>
           ))}
+
+        {/* Settings tab — global, persisted settings */}
+        {view === "settings" && <SettingsView />}
 
         {/* Floating legend (tic / basepeak / ion — not multi) */}
         {showLegend && (

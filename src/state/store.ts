@@ -64,6 +64,9 @@ type State = {
   smoothSigma: number;
   /** BL-07: Histogram equalization mode. */
   histogramMode: HistogramMode;
+  /** Global Δm/z (Da) applied when clicking a peak in the spectrum to render
+   *  the ion image for that mass. Persisted in localStorage. */
+  peakDeltaMass: number;
   /** BL-02: Multi-channel overlay state (RGB overlay of three m/z windows). */
   multiChannel: MultiChannelState | null;
   /** BL-03: Mean spectrum across all (or sampled) pixels. */
@@ -83,6 +86,8 @@ type Actions = {
   setTicNorm: (enabled: boolean) => void;
   setSmoothSigma: (sigma: number) => void;
   setHistogramMode: (mode: HistogramMode) => void;
+  /** Set the global peak-click Δm/z (Da); persisted to localStorage. */
+  setPeakDeltaMass: (delta: number) => void;
   // BL-02: multi-channel overlay.
   renderMultiChannel: (channels: (ChannelRequest | null)[]) => void;
   // BL-03: mean spectrum across all pixels.
@@ -91,6 +96,70 @@ type Actions = {
   requestRoiSpectrum: (spectrumIndices: number[]) => void;
   clearRoi: () => void;
 };
+
+// ---------------------------------------------------------------------------
+// Global settings persistence — localStorage ("local context of the browser").
+// The display/render settings + the peak-click Δm/z survive reloads and are
+// shared across files. Keyed + versioned so a schema change can't crash load.
+// ---------------------------------------------------------------------------
+const SETTINGS_KEY = "mzpeakiv.settings.v1";
+
+type PersistedSettings = {
+  colormap: Colormap;
+  scale: "linear" | "log";
+  percentile: number;
+  ticNorm: boolean;
+  smoothSigma: number;
+  histogramMode: HistogramMode;
+  peakDeltaMass: number;
+};
+
+const SETTINGS_DEFAULTS: PersistedSettings = {
+  colormap: "viridis",
+  scale: "linear",
+  percentile: 0.99,
+  ticNorm: true,
+  smoothSigma: 0,
+  histogramMode: "none",
+  peakDeltaMass: 0.3,
+};
+
+function loadSettings(): PersistedSettings {
+  if (typeof localStorage === "undefined") return { ...SETTINGS_DEFAULTS };
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { ...SETTINGS_DEFAULTS };
+    return { ...SETTINGS_DEFAULTS, ...(JSON.parse(raw) as Partial<PersistedSettings>) };
+  } catch {
+    return { ...SETTINGS_DEFAULTS };
+  }
+}
+
+/** Read the current settings slice from the live store. */
+function settingsSlice(): PersistedSettings {
+  const s = useStore.getState();
+  return {
+    colormap: s.colormap,
+    scale: s.scale,
+    percentile: s.percentile,
+    ticNorm: s.ticNorm,
+    smoothSigma: s.smoothSigma,
+    histogramMode: s.histogramMode,
+    peakDeltaMass: s.peakDeltaMass,
+  };
+}
+
+/** Persist the current settings slice to localStorage (called from setters). */
+function persistSettings(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsSlice()));
+  } catch {
+    /* quota / private-mode — non-fatal */
+  }
+}
+
+const persisted = loadSettings();
 
 const initialState: State = {
   fileMeta: null,
@@ -109,15 +178,17 @@ const initialState: State = {
   mzWindow: null,
   ionImage: null,
   ionImageStats: null,
-  colormap: "viridis",
-  scale: "linear",
-  percentile: 0.99,
+  // Hydrated from localStorage (persisted global settings) with built-in defaults.
+  colormap: persisted.colormap,
+  scale: persisted.scale,
+  percentile: persisted.percentile,
   // Phase 5 default.
   isRendering: false,
-  // BL defaults.
-  ticNorm: true,
-  smoothSigma: 0,
-  histogramMode: "none",
+  // BL defaults (persisted).
+  ticNorm: persisted.ticNorm,
+  smoothSigma: persisted.smoothSigma,
+  histogramMode: persisted.histogramMode,
+  peakDeltaMass: persisted.peakDeltaMass,
   multiChannel: null,
   meanSpectrum: null,
   roiIndices: null,
@@ -168,7 +239,8 @@ export const useStore = create<State & Actions>((set) => ({
 
   openUrl(url: string) {
     currentRequestId = Date.now();
-    set({ ...initialState, stage: "zip-index" });
+    // Reset file state but PRESERVE the user's global settings across loads.
+    set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
     postLoadWhenReady(() =>
       worker.postMessage({ type: "loadUrl", url } satisfies WorkerRequest),
     );
@@ -176,7 +248,8 @@ export const useStore = create<State & Actions>((set) => ({
 
   async openFile(file: File) {
     currentRequestId = Date.now();
-    set({ ...initialState, stage: "zip-index" });
+    // Reset file state but PRESERVE the user's global settings across loads.
+    set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
     let buffer: ArrayBuffer;
     try {
       buffer = await file.arrayBuffer();
@@ -236,21 +309,32 @@ export const useStore = create<State & Actions>((set) => ({
   // ImagingPanel re-rasterizes the cached ionImage on colormap/scale change (D-02/SC-5).
   setColormapSettings(colormap: Colormap, scale: "linear" | "log", percentile: number) {
     set({ colormap, scale, percentile });
+    persistSettings();
   },
 
   // BL-01: Toggle TIC normalization.
   setTicNorm(enabled: boolean) {
     set({ ticNorm: enabled });
+    persistSettings();
   },
 
   // BL-04: Update Gaussian smooth sigma.
   setSmoothSigma(sigma: number) {
     set({ smoothSigma: sigma });
+    persistSettings();
   },
 
   // BL-07: Update histogram equalization mode.
   setHistogramMode(mode: HistogramMode) {
     set({ histogramMode: mode });
+    persistSettings();
+  },
+
+  // Global peak-click Δm/z (Da); persisted to localStorage.
+  setPeakDeltaMass(delta: number) {
+    if (!Number.isFinite(delta) || delta <= 0) return;
+    set({ peakDeltaMass: delta });
+    persistSettings();
   },
 
   // BL-02: Render an RGB multi-channel overlay.

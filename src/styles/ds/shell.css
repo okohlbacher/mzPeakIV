@@ -208,6 +208,21 @@
 .popover__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 .popover__lbl { font-size: var(--text-xs); color: var(--text-muted); }
 
+/* ── Settings tab (stage view) ───────────────────────────────────────────── */
+.settings-card {
+  width: min(440px, 92%); max-height: 100%; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
+  padding: var(--space-7); display: flex; flex-direction: column; gap: var(--space-7);
+}
+.settings-card__group { display: flex; flex-direction: column; gap: var(--space-4); }
+.settings-card__group .mz-overline { margin-bottom: var(--space-1); }
+.settings-card__hint { margin: 0; font-size: var(--text-2xs); color: var(--text-faint); line-height: var(--leading-normal); }
+
+/* ── Peak-list cells (spectrum dock) ─────────────────────────────────────── */
+[data-testid="peak-cell"]:hover { background: var(--accent-subtle); }
+[data-testid="peak-cell"]:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 1040px) {
   .body { grid-template-columns: 1fr; }

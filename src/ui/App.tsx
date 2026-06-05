@@ -12,8 +12,8 @@ import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
-import { SettingsPopover } from "./SettingsPopover";
 import { Badge } from "./ds";
+import type { View } from "./viewTypes";
 
 const LOGO = `${import.meta.env.BASE_URL}openms-logo.png`;
 const WIDE_QUERY = "(min-width: 1041px)";
@@ -53,9 +53,8 @@ export function App() {
   );
   const [railOpen, setRailOpen] = useState(false); // narrow-screen rail overlay
   const [reopen, setReopen] = useState(false); // "Open file" re-shows the loader
-  const [view, setView] = useState<"overview" | "ion" | "multi">("overview");
+  const [view, setView] = useState<View>("overview");
   const [overviewMode, setOverviewMode] = useState<"tic" | "basepeak">("tic");
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia(WIDE_QUERY);
@@ -109,12 +108,13 @@ export function App() {
           )}
           <div className="topbar__spacer" />
           <div className="topbar__actions">
-            {hasShell && (
+            {ready && isImaging && (
               <button
                 className="iconbtn"
                 aria-label="Settings"
-                aria-pressed={settingsOpen}
-                onClick={() => setSettingsOpen((v) => !v)}
+                aria-pressed={view === "settings"}
+                onClick={() => setView("settings")}
+                title="Global settings"
               >
                 <Settings size={16} />
               </button>
@@ -130,10 +130,6 @@ export function App() {
             )}
           </div>
         </header>
-
-        {settingsOpen && hasShell && (
-          <SettingsPopover onClose={() => setSettingsOpen(false)} />
-        )}
 
         {/* ── Body ──────────────────────────────────────────────────────── */}
         <div className={`body${railVisible && isWide ? "" : " body--norail"}`}>
@@ -192,7 +188,7 @@ export function App() {
                   className="dock"
                   style={{ height: "auto", minHeight: "var(--shell-spectrum-h)", maxHeight: 320 }}
                 >
-                  <SpectrumPanel />
+                  <SpectrumPanel setView={setView} />
                 </div>
               </>
             )}

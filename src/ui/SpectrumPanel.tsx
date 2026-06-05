@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 import { useStore } from "../state/store";
+import type { View } from "./viewTypes";
 
 /**
  * Compact spectrum panel — sits at the top of the right column.
@@ -14,12 +15,13 @@ import { useStore } from "../state/store";
  * BL-03: Mean spectrum button — shows the file-wide mean spectrum when no
  * pixel is selected (or explicitly requested). Pixel spectrum takes priority.
  *
- * BL-08: Peak table for centroid spectra — shown below the chart with top-20
- * peaks, sorted by intensity descending.
+ * BL-08: Peak table for centroid spectra — compact multi-column m/z + % table
+ * (top 50). Clicking a peak's m/z renders that mass's ion image at the global
+ * peak-click Δm/z and switches to the Ion Image view.
  *
  * BL-09: Clicking the uPlot chart area fires renderIonImage for the clicked m/z.
  */
-export function SpectrumPanel() {
+export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
   const mzWindow = useStore((s) => s.mzWindow);
   const stats = useStore((s) => s.stats);
   const grid = useStore((s) => s.grid);
@@ -29,6 +31,7 @@ export function SpectrumPanel() {
   const meanSpectrum = useStore((s) => s.meanSpectrum);
   const requestMeanSpectrum = useStore((s) => s.requestMeanSpectrum);
   const renderIonImage = useStore((s) => s.renderIonImage);
+  const peakDeltaMass = useStore((s) => s.peakDeltaMass);
 
   // BL-03: whether the user has explicitly dismissed the mean spectrum display
   const [showMean, setShowMean] = useState(false);
@@ -36,10 +39,22 @@ export function SpectrumPanel() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
   const mzWindowRef = useRef<{ mz: number; tolDa: number } | null>(null);
-  // Keep renderIonImage reachable from the one-time uPlot click closure without
-  // recreating the plot (Zustand action ref is stable; ref keeps it fresh).
+  // Keep renderIonImage + the global Δm/z + setView reachable from the one-time
+  // uPlot click closure without recreating the plot (refs stay fresh).
   const renderIonImageRef = useRef(renderIonImage);
   renderIonImageRef.current = renderIonImage;
+  const peakDeltaMassRef = useRef(peakDeltaMass);
+  peakDeltaMassRef.current = peakDeltaMass;
+  const setViewRef = useRef(setView);
+  setViewRef.current = setView;
+
+  // Render the ion image for a clicked m/z using the global peak-click Δm/z and
+  // switch to the Ion Image view. Shared by the chart click and the peak table.
+  function renderIonForMass(mz: number) {
+    if (!Number.isFinite(mz) || mz <= 0) return;
+    renderIonImageRef.current(mz, peakDeltaMassRef.current);
+    setViewRef.current?.("ion");
+  }
 
   const numSpectra = stats?.numSpectra ?? 0;
 
@@ -180,10 +195,7 @@ export function SpectrumPanel() {
     // Call through the ref so the latest store action is always used.
     plot.over.addEventListener("click", (e: MouseEvent) => {
       const mz = plot.posToVal(e.offsetX, "x");
-      if (Number.isFinite(mz) && mz > 0) {
-        const tolDa = mzWindowRef.current?.tolDa ?? 0.3;
-        renderIonImageRef.current(mz, tolDa);
-      }
+      renderIonForMass(mz);
     });
 
     // ResizeObserver tracks the dock reflow (rail toggle, responsive, font load)
@@ -234,7 +246,7 @@ export function SpectrumPanel() {
     // Build index array sorted by intensity descending
     const indices = Array.from({ length: mzArr.length }, (_, i) => i);
     indices.sort((a, b) => intArr[b] - intArr[a]);
-    const topN = 20;
+    const topN = 50;
     const shown = indices.slice(0, topN);
     extraPeakCount = Math.max(0, indices.length - topN);
     for (const i of shown) {
@@ -348,27 +360,31 @@ export function SpectrumPanel() {
               Copy CSV
             </button>
           </div>
-          <table
+          {/* Compact multi-column peak list: m/z + rel%. Each entry is a button
+              that renders that mass's ion image at the global Δm/z (BL-08+). */}
+          <div
             data-testid="peak-table"
-            style={{ borderCollapse: "collapse", fontSize: "var(--text-2xs)", width: "100%", tableLayout: "fixed" }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(108px, 1fr))",
+              columnGap: "var(--space-4)",
+              rowGap: "1px",
+            }}
           >
-            <thead>
-              <tr>
-                <th style={thStyle}>m/z</th>
-                <th style={thStyle}>Intensity</th>
-                <th style={thStyle}>Rel%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {peakRows.map((row, i) => (
-                <tr key={i}>
-                  <td style={tdStyle}>{row.mz.toFixed(4)}</td>
-                  <td style={tdStyle}>{fmtIntensity(row.intensity)}</td>
-                  <td style={tdStyle}>{row.rel.toFixed(1)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            {peakRows.map((row, i) => (
+              <button
+                key={i}
+                type="button"
+                data-testid="peak-cell"
+                onClick={() => renderIonForMass(row.mz)}
+                title={`Render ion image for m/z ${row.mz.toFixed(4)} ± ${peakDeltaMass} Da`}
+                style={peakCellStyle}
+              >
+                <span style={{ color: "var(--text-strong)" }}>{row.mz.toFixed(4)}</span>
+                <span style={{ color: "var(--text-faint)" }}>{row.rel.toFixed(1)}%</span>
+              </button>
+            ))}
+          </div>
           {extraPeakCount > 0 && (
             <div style={{ fontSize: "var(--text-2xs)", color: "var(--text-faint)", marginTop: "var(--space-1)", textAlign: "right" }}>
               … {extraPeakCount.toLocaleString()} more peaks
@@ -380,20 +396,18 @@ export function SpectrumPanel() {
   );
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: "right",
-  padding: "var(--space-1) var(--space-3)",
-  fontWeight: 600,
+const peakCellStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "var(--space-3)",
+  padding: "1px var(--space-3)",
   fontFamily: "var(--font-mono)",
-  color: "var(--indigo-600)",
-  borderBottom: "1px solid var(--border-soft)",
-  whiteSpace: "nowrap",
-};
-
-const tdStyle: React.CSSProperties = {
-  textAlign: "right",
-  padding: "var(--space-1) var(--space-3)",
-  fontFamily: "var(--font-mono)",
+  fontSize: "var(--text-2xs)",
   fontVariantNumeric: "tabular-nums",
-  color: "var(--text-body)",
+  background: "transparent",
+  border: "none",
+  borderRadius: "var(--radius-xs)",
+  cursor: "pointer",
+  textAlign: "left",
+  width: "100%",
 };
