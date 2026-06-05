@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Grid, Image, Layers, Download } from "lucide-react";
+import { Grid, Image, Layers, Download, Blend } from "lucide-react";
 
 import { useStore } from "../state/store";
 import {
@@ -157,6 +157,12 @@ export function ImagingPanel({
   const bpCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mcCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const blendCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Blend view: per-layer opacity (0–1) for the TIC / ion / base-peak overlay.
+  const [blendOpacity, setBlendOpacity] = useState<{ tic: number; ion: number; basepeak: number }>(
+    { tic: 1, ion: 0.6, basepeak: 0 },
+  );
 
   // Store the last rasterized ion image RGBA for re-blit during overlays.
   const ionRgbaRef = useRef<Uint8ClampedArray | null>(null);
@@ -361,6 +367,73 @@ export function ImagingPanel({
     // view dependency: same mount-after-data issue as the ion canvas above.
   }, [multiChannel, grid, tic, ticNorm, view]);
 
+  // Blend canvas paint — alpha-over the TIC / ion / base-peak layers (bottom →
+  // top) by their slider opacities onto the dark stage colour.
+  useEffect(() => {
+    if (view !== "blend") return;
+    const canvas = blendCanvasRef.current;
+    if (!canvas || !grid) return;
+    canvas.width = grid.width;
+    canvas.height = grid.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const n = grid.width * grid.height;
+    const out = new Uint8ClampedArray(n * 4);
+    for (let i = 0; i < n; i++) {
+      out[i * 4] = 14;
+      out[i * 4 + 1] = 18;
+      out[i * 4 + 2] = 22; // --ink, the dark stage
+      out[i * 4 + 3] = 255;
+    }
+    const mzMin = stats?.mzRange?.[0] ?? 0;
+    const mzMax = stats?.mzRange?.[1] ?? 1000;
+    const layers: Array<[Uint8ClampedArray, number]> = [];
+    if (basePeakMz && blendOpacity.basepeak > 0)
+      layers.push([rasterizeBasePeakMap(basePeakMz, grid, mzMin, mzMax), blendOpacity.basepeak]);
+    if (tic && blendOpacity.tic > 0) layers.push([rasterizeTic(tic, grid), blendOpacity.tic]);
+    if (ionImage && blendOpacity.ion > 0)
+      layers.push([
+        rasterizeImage(ionImage, grid, {
+          colormap,
+          percentile,
+          logScale: scale === "log",
+          tic: ticNorm ? tic : null,
+          ticNorm,
+          smoothSigma,
+          histogramMode,
+        }),
+        blendOpacity.ion,
+      ]);
+
+    for (const [rgba, a] of layers) {
+      const inv = 1 - a;
+      for (let i = 0; i < n; i++) {
+        const o = i * 4;
+        out[o] = rgba[o] * a + out[o] * inv;
+        out[o + 1] = rgba[o + 1] * a + out[o + 1] * inv;
+        out[o + 2] = rgba[o + 2] * a + out[o + 2] * inv;
+      }
+    }
+    const img = new ImageData(grid.width, grid.height);
+    img.data.set(out);
+    ctx.putImageData(img, 0, 0);
+  }, [
+    view,
+    blendOpacity,
+    tic,
+    ionImage,
+    basePeakMz,
+    grid,
+    stats,
+    colormap,
+    scale,
+    percentile,
+    ticNorm,
+    smoothSigma,
+    histogramMode,
+  ]);
+
   // Grid is null until the first "Show Ion Image" click triggers lazy init.
   // We still render the controls row so the user can enter m/z and load.
   const aspect = grid
@@ -406,9 +479,67 @@ export function ImagingPanel({
   }, [grid, aspect]);
 
   // Explicit pixel size for the active canvas (contain-fit); falls back to the
-  // CSS aspect-ratio box until the first measurement lands.
+  // ── Zoom (all image tabs) ──────────────────────────────────────────────
+  // The canvas is the contain-fit size × zoom; when zoomed in the stage becomes
+  // scrollable (overflow:auto) so the user can pan. Wheel zooms toward the
+  // cursor via a native non-passive listener (so preventDefault works).
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  const displaySizeRef = useRef(displaySize);
+  displaySizeRef.current = displaySize;
+
+  // Reset zoom + scroll when switching tabs/overview mode.
+  useEffect(() => {
+    setZoom(1);
+    if (stageRef.current) {
+      stageRef.current.scrollLeft = 0;
+      stageRef.current.scrollTop = 0;
+    }
+  }, [view, overviewMode]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const el = stage; // non-null binding captured by the closures below
+    function onWheel(e: WheelEvent) {
+      if (!displaySizeRef.current) return;
+      e.preventDefault();
+      const prev = zoomRef.current;
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+      const next = Math.min(8, Math.max(1, prev * factor));
+      if (next === prev) return;
+      const ratio = next / prev;
+      const rect = el.getBoundingClientRect();
+      const ox = e.clientX - rect.left;
+      const oy = e.clientY - rect.top;
+      const sl = el.scrollLeft;
+      const st = el.scrollTop;
+      setZoom(next);
+      // Keep the point under the cursor stable after the canvas resizes.
+      requestAnimationFrame(() => {
+        el.scrollLeft = (sl + ox) * ratio - ox;
+        el.scrollTop = (st + oy) * ratio - oy;
+      });
+    }
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  function zoomBy(factor: number) {
+    setZoom((z) => Math.min(8, Math.max(1, z * factor)));
+  }
+  function zoomReset() {
+    setZoom(1);
+    if (stageRef.current) {
+      stageRef.current.scrollLeft = 0;
+      stageRef.current.scrollTop = 0;
+    }
+  }
+
+  // CSS aspect-ratio box until the first measurement lands. Scaled by zoom.
   const canvasSizeStyle: React.CSSProperties = displaySize
-    ? { width: displaySize.w, height: displaySize.h }
+    ? { width: displaySize.w * zoom, height: displaySize.h * zoom }
     : { aspectRatio: cssAspectRatio, maxWidth: "100%", maxHeight: "100%" };
 
   // Hover-readout text for a grid cell, tailored to the active view.
@@ -518,8 +649,8 @@ export function ImagingPanel({
   // overlay (a child of .imgframe) maps grid → canvas px directly.
   function gridRectToPx(rect: { x0: number; y0: number; x1: number; y1: number }) {
     if (!grid || !displaySize) return null;
-    const sx = displaySize.w / grid.width;
-    const sy = displaySize.h / grid.height;
+    const sx = (displaySize.w * zoom) / grid.width;
+    const sy = (displaySize.h * zoom) / grid.height;
     const rx = Math.min(rect.x0, rect.x1);
     const ry = Math.min(rect.y0, rect.y1);
     const rw = Math.abs(rect.x1 - rect.x0) + 1;
@@ -610,8 +741,11 @@ export function ImagingPanel({
   // Legend tick labels for the active view.
   const bpLow = stats?.mzRange ? String(Math.round(stats.mzRange[0])) : "lo";
   const bpHigh = stats?.mzRange ? String(Math.round(stats.mzRange[1])) : "hi";
-  const showColormapCtl =
-    (view === "overview" && overviewMode === "tic") || view === "ion";
+  // Colormap selector applies ONLY to the ion image (rasterizeImage). The TIC
+  // and base-peak overviews use their own fixed palettes (rasterizeTic /
+  // rasterizeBasePeakMap ignore the store colormap), so the control would be
+  // inert there — hide it on overview (and multi, which is fixed R/G/B).
+  const showColormapCtl = view === "ion";
   // Single hover readout for all views (onImgMove tailors the text per view).
   const activeReadout = readout;
   const ticHasImage = view === "overview" && overviewMode === "tic" && tic !== null && grid !== null;
@@ -633,6 +767,7 @@ export function ImagingPanel({
             { value: "overview", label: "Overview", icon: <Grid size={13} /> },
             { value: "ion", label: "Ion Image", icon: <Image size={13} /> },
             { value: "multi", label: "Multi-channel", icon: <Layers size={13} /> },
+            { value: "blend", label: "Blend", icon: <Blend size={13} /> },
           ]}
         />
         <div className="toolbar__sep" />
@@ -720,6 +855,32 @@ export function ImagingPanel({
           </div>
         )}
 
+        {view === "blend" && (
+          <div className="toolbar__group" style={{ gap: "var(--space-5)" }}>
+            {([
+              ["tic", "TIC", tic !== null],
+              ["ion", "Ion", ionImage !== null],
+              ["basepeak", "Base-peak", basePeakMz !== null],
+            ] as const).map(([key, label, available]) => (
+              <span key={key} className="blend-row" title={available ? "" : "no data for this layer"}>
+                <span className="toolbar__lbl">{label}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(blendOpacity[key] * 100)}
+                  disabled={!available}
+                  aria-label={`${label} opacity`}
+                  onChange={(e) =>
+                    setBlendOpacity((o) => ({ ...o, [key]: Number(e.target.value) / 100 }))
+                  }
+                />
+                <span className="blend-pct">{Math.round(blendOpacity[key] * 100)}%</span>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="toolbar__spacer" />
 
         {showColormapCtl && (
@@ -753,7 +914,11 @@ export function ImagingPanel({
       </div>
 
       {/* ── Stage: the dark data canvas area ───────────────────────────────── */}
-      <div className="stage" ref={stageRef}>
+      <div
+        className="stage"
+        ref={stageRef}
+        style={{ overflow: zoom > 1 ? "auto" : "hidden" }}
+      >
         {mixedRepresentationWarning && (
           <div
             data-testid="tic-mixed-warning"
@@ -861,6 +1026,28 @@ export function ImagingPanel({
             </div>
           ))}
 
+        {/* Blend — opacity overlay of the TIC / ion / base-peak layers */}
+        {view === "blend" &&
+          (tic || ionImage || basePeakMz ? (
+            <div className="imgframe">
+              <canvas
+                ref={blendCanvasRef}
+                className="cross"
+                data-testid="blend-canvas"
+                onMouseDown={onImgDown}
+                onMouseMove={onImgMove}
+                onMouseUp={onImgUp}
+                onMouseLeave={onImgLeave}
+                style={{ ...canvasSizeStyle, userSelect: "none" }}
+              />
+              {roiOverlay}
+            </div>
+          ) : (
+            <div className="stage__empty">
+              No layers to blend yet — load an overview and render an ion image.
+            </div>
+          ))}
+
         {/* Floating legend (tic / basepeak / ion — not multi) */}
         {showLegend && (
           <div className="stage__legend">
@@ -870,6 +1057,24 @@ export function ImagingPanel({
               low={bpHasImage ? bpLow : "0"}
               high={bpHasImage ? bpHigh : "max"}
             />
+          </div>
+        )}
+
+        {/* Zoom control (any image view). Wheel over the stage also zooms. */}
+        {(ticHasImage ||
+          bpHasImage ||
+          ionHasImage ||
+          (view === "multi" && !!multiChannel?.images)) && (
+          <div className="stage__zoom" role="group" aria-label="Zoom">
+            <button className="iconbtn" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
+              −
+            </button>
+            <button className="stage__zoom-pct" aria-label="Reset zoom" onClick={zoomReset}>
+              {Math.round(zoom * 100)}%
+            </button>
+            <button className="iconbtn" aria-label="Zoom in" onClick={() => zoomBy(1.2)}>
+              +
+            </button>
           </div>
         )}
 

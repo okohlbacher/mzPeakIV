@@ -138,6 +138,9 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
       width: init.width,
       height: init.height,
       title: undefined, // title shown in the dock heading instead
+      // Hide uPlot's built-in legend (the "m/z / Intensity" series row with
+      // toggle checkboxes) — not useful here; the values show in the heading.
+      legend: { show: false },
       scales: { x: { time: false } },
       series: [
         {
