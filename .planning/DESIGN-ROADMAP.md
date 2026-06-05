@@ -1,5 +1,17 @@
 # mzPeakIV — OpenMS Design System Migration Roadmap (v2)
 
+> **STATUS: COMPLETE (all phases shipped & verified).**
+> P0 tokens/fonts · P1 DS primitives · P2 shell (+ 2 pre-existing bug fixes:
+> non-imaging metadata load, worker-init race handshake) · P3 reskinned inspector
+> panels · P4 toolbar + dark data stage + settings popover · P5 spectrum dock
+> (uPlot ResizeObserver) + loader card · P6 responsive rail + brand + motion.
+> Every phase: tsc clean, 147 unit + 5 e2e green, browser-verified (HR2MSI
+> imaging round-trip: dark-stage TIC → pixel click → styled spectrum + peak
+> table; settings popover; responsive overlay). BL-01–09 backlog features all
+> carried into the new shell. The ADD-01–05 spec-gap items remain future work
+> (they need mzPeak files using the new schema, which don't exist yet).
+
+
 **Source:** `mzPeak Design System.zip` → `.design-handoff/design_handoff_mzpeakiv_redesign/`
 **Nature:** Reskin + restructure (NOT a rewrite). No change to reader, `rasterize.ts`, colormap math, or Zustand store *logic*. Add only UI-presentation state.
 **Target:** Persistent app shell (top bar / inspector rail / toolbar / dark data stage / spectrum dock / status bar); only the center view swaps. IBM Plex Sans/Mono, OpenMS electric blue `#3b54da`, token-driven `.mz-*` classes.
