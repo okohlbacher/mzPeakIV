@@ -1,12 +1,6 @@
-import { useState } from "react";
-
 import { useStore } from "../state/store";
 import type { CoordSourceStrategy } from "../imaging/types";
-
-// Warning amber (caution, NOT error). Reserved by the UI-SPEC for anomalies:
-// sparse fill, duplicates, or a discovery-vs-observed disagreement.
-const WARNING = "#8a6d00";
-const MUTED = "#888";
+import { Panel, StatRow, Badge } from "./ds";
 
 /** Human-readable label for the winning CoordSource strategy (UI-SPEC copy). */
 function coordSourceLabel(strategy: CoordSourceStrategy): string {
@@ -21,48 +15,36 @@ function coordSourceLabel(strategy: CoordSourceStrategy): string {
 }
 
 /**
- * Grid diagnostics readout (IMG-03). Inline expandable section cloned from
- * CapabilitiesPanel: a compact summary line that toggles a diagnostics table.
- *
- * Three render states:
- *  - `capabilities` not yet set → null (identical to sibling panels).
- *  - imaging file, grid present → compact line + expandable table.
- *  - non-imaging file (grid === null) → single muted notice, NO expand, NO table,
- *    NEVER the ErrorBanner (D-04/D-06). A non-imaging file is a valid outcome.
+ * Grid diagnostics readout (IMG-03), reskinned to Panel + StatRow + Badge.
+ *  - capabilities not set → null.
+ *  - imaging file, grid present → collapsible Panel of diagnostic StatRows; an
+ *    anomaly (sparse fill / duplicates / discovery disagreement) shows a warning
+ *    Badge in the title.
+ *  - non-imaging file (grid === null, isImaging false) → calm muted notice (D-04).
  */
 export function GridDiagnosticsPanel() {
   const grid = useStore((s) => s.grid);
   const capabilities = useStore((s) => s.capabilities);
-  const [expanded, setExpanded] = useState(false);
 
   if (!capabilities) return null;
 
-  // Non-imaging branch: calm muted notice when the file has no spatial coordinates (D-04).
-  // Guard on capabilities.isImaging === false to distinguish "not imaging data" from
-  // "imaging file where grid building failed" (the latter shows nothing until an error surfaces).
   if (grid === null && capabilities.isImaging === false) {
     return (
-      <section
-        aria-label="grid-panel"
-        data-testid="grid-panel"
-        style={{ padding: "0.5rem", borderTop: "1px solid #eee" }}
-      >
-        <h3 style={{ margin: "0 0 0.4rem" }}>Grid</h3>
-        <span data-testid="grid-not-imaging-notice" style={{ color: MUTED }}>
+      <Panel title="Grid" testid="grid-panel">
+        <span
+          data-testid="grid-not-imaging-notice"
+          style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}
+        >
           Not imaging data — no spatial coordinates found
         </span>
-      </section>
+      </Panel>
     );
   }
 
-  // Grid is null but file is (or may be) imaging — building may still be in progress or failed.
-  // Return null to avoid a misleading "not imaging" notice; store.error surfaces failures.
   if (grid === null) return null;
 
-  const { width, height, filledCount, totalCells, pixelSizeUm, diagnostics } =
-    grid;
-  const { uniqueCoordCount, spectrumCount, missingCount, duplicateCount } =
-    diagnostics;
+  const { width, height, filledCount, totalCells, pixelSizeUm, diagnostics } = grid;
+  const { uniqueCoordCount, spectrumCount, missingCount, duplicateCount } = diagnostics;
 
   const pct = Math.round((filledCount / totalCells) * 100);
   const anomaly =
@@ -70,190 +52,105 @@ export function GridDiagnosticsPanel() {
     duplicateCount > 0 ||
     diagnostics.discoveryDisagreement != null;
 
-  const summaryColor = anomaly ? WARNING : undefined;
-
   return (
-    <section
-      aria-label="grid-panel"
-      data-testid="grid-panel"
-      style={{ padding: "0.5rem", borderTop: "1px solid #eee" }}
-    >
-      <h3 style={{ margin: "0 0 0.4rem" }}>Grid</h3>
-
-      <div
-        data-testid="grid-summary-line"
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
-        onClick={() => setExpanded((e) => !e)}
-        onKeyDown={(ev) => {
-          if (ev.key === "Enter" || ev.key === " ") {
-            ev.preventDefault();
-            setExpanded((e) => !e);
-          }
-        }}
-        style={{
-          cursor: "pointer",
-          fontSize: "0.8rem",
-          color: summaryColor,
-        }}
-      >
-        <span data-testid="grid-expand-toggle" aria-hidden="true">
-          {expanded ? "▾" : "▸"}
-        </span>{" "}
-        {anomaly && (
-          <span data-testid="grid-anomaly-warning" style={{ color: WARNING }}>
-            ⚠{" "}
+    <Panel
+      title="Grid"
+      testid="grid-panel"
+      count={
+        anomaly ? (
+          <span data-testid="grid-anomaly-warning">
+            <Badge tone="warning" dot>
+              {pct}%
+            </Badge>
           </span>
-        )}
-        Grid: {width.toLocaleString()}×{height.toLocaleString()} —{" "}
-        {filledCount.toLocaleString()}/{totalCells.toLocaleString()} px filled (
-        {pct}%)
+        ) : (
+          `${pct}%`
+        )
+      }
+    >
+      <div data-testid="grid-diagnostics-table">
+        <StatRow
+          label="Dimensions"
+          testid="grid-row-dimensions"
+          value={
+            <>
+              {width.toLocaleString()} × {height.toLocaleString()} <em>px</em>
+            </>
+          }
+        />
+        <StatRow
+          label="Fill"
+          testid="grid-row-fill"
+          value={
+            <>
+              {filledCount.toLocaleString()} / {totalCells.toLocaleString()}{" "}
+              <em>px ({pct}%)</em>
+            </>
+          }
+        />
+        <StatRow
+          label="Spectra"
+          testid="grid-row-spectra"
+          value={
+            <>
+              {uniqueCoordCount.toLocaleString()} <em>uniq /</em>{" "}
+              {spectrumCount.toLocaleString()}
+            </>
+          }
+        />
+        <StatRow
+          label="Missing"
+          testid="grid-row-missing"
+          value={
+            <>
+              {missingCount.toLocaleString()} <em>px</em>
+            </>
+          }
+        />
+        <StatRow
+          label="Duplicates"
+          testid="grid-row-duplicates"
+          value={
+            duplicateCount > 0 ? (
+              <Badge tone="warning">{duplicateCount.toLocaleString()} px</Badge>
+            ) : (
+              <>
+                {duplicateCount.toLocaleString()} <em>px</em>
+              </>
+            )
+          }
+        />
+        <StatRow
+          label="Pixel size"
+          testid="grid-row-pixel-size"
+          value={
+            pixelSizeUm ? (
+              <>
+                {pixelSizeUm.x.toLocaleString()} × {pixelSizeUm.y.toLocaleString()}{" "}
+                <em>µm</em>
+              </>
+            ) : (
+              "1:1 (assumed)"
+            )
+          }
+        />
+        <StatRow
+          label="Coord source"
+          testid="grid-row-coord-source"
+          value={coordSourceLabel(grid.coordSourceStrategy)}
+        />
+        <StatRow
+          label="Discovery"
+          testid="grid-row-discovery"
+          value={
+            diagnostics.discoveryDisagreement ? (
+              <Badge tone="warning">disagree</Badge>
+            ) : (
+              "agrees"
+            )
+          }
+        />
       </div>
-
-      {expanded && (
-        <table
-          data-testid="grid-diagnostics-table"
-          style={{
-            fontSize: "0.8rem",
-            borderCollapse: "collapse",
-            width: "100%",
-            marginTop: "0.4rem",
-          }}
-        >
-          <tbody>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Dimensions
-              </th>
-              <td data-testid="grid-row-dimensions">
-                {width.toLocaleString()} × {height.toLocaleString()} px
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Fill
-              </th>
-              <td data-testid="grid-row-fill">
-                {filledCount.toLocaleString()} / {totalCells.toLocaleString()}{" "}
-                pixels ({pct}% filled)
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Spectra
-              </th>
-              <td data-testid="grid-row-spectra">
-                {uniqueCoordCount.toLocaleString()} unique coords /{" "}
-                {spectrumCount.toLocaleString()} spectra
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Missing
-              </th>
-              <td data-testid="grid-row-missing">
-                {missingCount.toLocaleString()} pixels
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Duplicates
-              </th>
-              <td
-                data-testid="grid-row-duplicates"
-                style={duplicateCount > 0 ? { color: WARNING } : undefined}
-              >
-                {duplicateCount.toLocaleString()} pixels
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Pixel size
-              </th>
-              <td data-testid="grid-row-pixel-size">
-                {pixelSizeUm ? (
-                  `${pixelSizeUm.x.toLocaleString()} × ${pixelSizeUm.y.toLocaleString()} µm`
-                ) : (
-                  <span style={{ color: MUTED }}>
-                    1:1 (assumed — no IMS:1000046/47)
-                  </span>
-                )}
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Coord source
-              </th>
-              <td data-testid="grid-row-coord-source">
-                {coordSourceLabel(grid.coordSourceStrategy)}
-              </td>
-            </tr>
-            <tr>
-              <th
-                style={{
-                  textAlign: "left",
-                  paddingRight: "0.75rem",
-                  fontWeight: 600,
-                }}
-              >
-                Discovery check
-              </th>
-              <td data-testid="grid-row-discovery">
-                {diagnostics.discoveryDisagreement ? (
-                  <span style={{ color: WARNING }}>
-                    {diagnostics.discoveryDisagreement}
-                  </span>
-                ) : (
-                  <span style={{ color: MUTED }}>agrees</span>
-                )}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      )}
-    </section>
+    </Panel>
   );
 }

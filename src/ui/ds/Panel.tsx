@@ -10,6 +10,8 @@ export interface PanelProps {
   open?: boolean;
   onToggle?: (open: boolean) => void;
   className?: string;
+  /** Forwarded to the section element (preserves e2e panel testids). */
+  testid?: string;
   children?: ReactNode;
 }
 
@@ -25,6 +27,7 @@ export function Panel({
   open,
   onToggle,
   className,
+  testid,
   children,
 }: PanelProps) {
   const [internal, setInternal] = useState(defaultOpen);
@@ -36,6 +39,7 @@ export function Panel({
     <section
       className={["mz-panel", className ?? ""].filter(Boolean).join(" ")}
       data-open={isOpen}
+      data-testid={testid}
     >
       <button
         type="button"
