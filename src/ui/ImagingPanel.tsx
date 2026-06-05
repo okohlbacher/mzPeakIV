@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Grid, Image, Layers, Download } from "lucide-react";
 
 import { useStore } from "../state/store";
+import {
+  Button,
+  SegmentedControl,
+  NumberField,
+  ColormapScale,
+} from "./ds";
 import {
   rasterizeTic,
   rasterizeImage,
@@ -15,12 +22,10 @@ import {
 } from "../export/tiff";
 import type { ImagingGrid } from "../imaging/types";
 import type { ChannelRequest } from "../worker/protocol";
-import type { HistogramMode } from "../compute/histogram";
 
 // Warning amber (caution, NOT error) — reused from GridDiagnosticsPanel's WARNING
 // constant for the mixed-representation surface (D-08).
 const WARNING = "#8a6d00";
-const MUTED = "#888";
 
 /** Hit-test result: a grid cell under the pointer, or null when off-canvas. */
 type Hit = { x0: number; y0: number; key: number };
@@ -96,7 +101,17 @@ function filenameStem(run: unknown): string {
  * BL additions: TIC norm toggle, Gaussian smooth, histogram contrast, multi-channel
  * tab, TIFF export, ROI rectangle selection.
  */
-export function ImagingPanel() {
+export function ImagingPanel({
+  view,
+  setView,
+  overviewMode,
+  setOverviewMode,
+}: {
+  view: "overview" | "ion" | "multi";
+  setView: (v: "overview" | "ion" | "multi") => void;
+  overviewMode: "tic" | "basepeak";
+  setOverviewMode: (m: "tic" | "basepeak") => void;
+}) {
   const grid = useStore((s) => s.grid);
   const tic = useStore((s) => s.tic);
   const selectedIndex = useStore((s) => s.selectedIndex);
@@ -118,17 +133,14 @@ export function ImagingPanel() {
   const stats = useStore((s) => s.stats);
   const fileMeta = useStore((s) => s.fileMeta);
 
-  // BL-01: TIC normalization
+  // BL-01: TIC normalization (getter only — setter lives in SettingsPopover)
   const ticNorm = useStore((s) => s.ticNorm);
-  const setTicNorm = useStore((s) => s.setTicNorm);
 
-  // BL-04: Gaussian smooth
+  // BL-04: Gaussian smooth (getter only — setter lives in SettingsPopover)
   const smoothSigma = useStore((s) => s.smoothSigma);
-  const setSmoothSigma = useStore((s) => s.setSmoothSigma);
 
-  // BL-07: Histogram contrast
+  // BL-07: Histogram contrast (getter only — setter lives in SettingsPopover)
   const histogramMode = useStore((s) => s.histogramMode);
-  const setHistogramMode = useStore((s) => s.setHistogramMode);
 
   // BL-02: Multi-channel
   const multiChannel = useStore((s) => s.multiChannel);
@@ -149,11 +161,6 @@ export function ImagingPanel() {
   const ionRgbaRef = useRef<Uint8ClampedArray | null>(null);
   // Store the last rasterized TIC RGBA for re-blit during ROI overlays.
   const ticRgbaRef = useRef<Uint8ClampedArray | null>(null);
-
-  // Main tab: "overview" | "ion-image" | "multi-channel"
-  const [mainTab, setMainTab] = useState<"overview" | "ion-image" | "multi-channel">("overview");
-  // Overview mode: "tic" shows TIC image, "basepeak" shows dominant-mass false-color
-  const [overviewMode, setOverviewMode] = useState<"tic" | "basepeak">("tic");
 
   const [readout, setReadout] = useState<{ text: string; muted: boolean }>({
     text: "",
@@ -182,7 +189,9 @@ export function ImagingPanel() {
 
   // BL-02: Multi-channel per-row inputs
   const [mcMz, setMcMz] = useState<[string, string, string]>(["", "", ""]);
-  const [mcTol, setMcTol] = useState<[string, string, string]>(["0.5", "0.5", "0.5"]);
+  // Per-channel tolerance is fixed at 0.5 Da (the editing control moved out of the
+  // toolbar in Phase 4); still read by handleRenderMultiChannel.
+  const [mcTol] = useState<[string, string, string]>(["0.5", "0.5", "0.5"]);
 
   // BL-06: ROI drag state
   type DragState = {
@@ -279,10 +288,10 @@ export function ImagingPanel() {
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-    // mainTab dependency: the ion canvas only mounts when its tab is active, so
-    // switching INTO the tab after ionImage already arrived must re-run this
+    // view dependency: the ion canvas only mounts when its view is active, so
+    // switching INTO the view after ionImage already arrived must re-run this
     // paint (deps would otherwise be unchanged and the fresh canvas stays blank).
-  }, [ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, mainTab]);
+  }, [ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, view]);
 
   // Phase 4 — ion image RING effect: re-blit then stroke the ring for the selected cell.
   // BL-01/04/07: also keyed on [ticNorm, smoothSigma, histogramMode].
@@ -324,7 +333,7 @@ export function ImagingPanel() {
     ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
-  }, [selectedIndex, ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, roiRect, mainTab]);
+  }, [selectedIndex, ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, roiRect, view]);
 
   // BL-02: Multi-channel canvas paint.
   useEffect(() => {
@@ -338,8 +347,8 @@ export function ImagingPanel() {
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-    // mainTab dependency: same mount-after-data issue as the ion canvas above.
-  }, [multiChannel, grid, tic, ticNorm, mainTab]);
+    // view dependency: same mount-after-data issue as the ion canvas above.
+  }, [multiChannel, grid, tic, ticNorm, view]);
 
   // Grid is null until the first "Show Ion Image" click triggers lazy init.
   // We still render the controls row so the user can enter m/z and load.
@@ -348,7 +357,6 @@ export function ImagingPanel() {
       ? grid.pixelSizeUm.x / grid.pixelSizeUm.y
       : 1
     : 1;
-  const displayWidth = "100%";
   const cssAspectRatio = grid
     ? `${grid.width * aspect} / ${grid.height}`
     : "1 / 1";
@@ -460,8 +468,8 @@ export function ImagingPanel() {
     if (!grid) return;
     const stem = filenameStem(fileMeta?.run);
 
-    // If on multi-channel tab and multi-channel images exist, export RGB
-    if (mainTab === "multi-channel" && multiChannel?.images) {
+    // If on multi-channel view and multi-channel images exist, export RGB
+    if (view === "multi" && multiChannel?.images) {
       const [r, g, b] = multiChannel.images;
       if (r && g && b) {
         const bytes = encodeRgbTiff(r, g, b, grid.width, grid.height);
@@ -621,452 +629,303 @@ export function ImagingPanel() {
 
   const canExportTiff = (ionImage !== null || (multiChannel?.images && multiChannel.images.some(Boolean))) && grid !== null;
 
+  // Legend tick labels for the active view.
+  const bpLow = stats?.mzRange ? String(Math.round(stats.mzRange[0])) : "lo";
+  const bpHigh = stats?.mzRange ? String(Math.round(stats.mzRange[1])) : "hi";
+  const showColormapCtl =
+    (view === "overview" && overviewMode === "tic") || view === "ion";
+  const activeReadout =
+    view === "overview" ? readout : view === "ion" ? ionReadout : { text: "", muted: false };
+  const ticHasImage = view === "overview" && overviewMode === "tic" && tic !== null && grid !== null;
+  const bpHasImage = view === "overview" && overviewMode === "basepeak" && basePeakMz !== null && grid !== null;
+  const ionHasImage = view === "ion" && ionImage !== null && grid !== null;
+  const showLegend = ticHasImage || bpHasImage || ionHasImage;
+  const legendColormap: "viridis" | "inferno" | "gray" | "basepeak" =
+    overviewMode === "basepeak" && view === "overview" ? "basepeak" : colormap;
+
   return (
-    <section
-      aria-label="imaging-panel"
-      data-testid="imaging-panel"
-      style={{ flexShrink: 0, padding: "0.5rem" }}
-    >
-      {/* Controls: m/z range → Show Ion Image → colormap/scale/percentile */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.5rem" }}>
-        {/* Row 1: m/z range input */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
-          <label style={{ fontWeight: 600, minWidth: "5rem" }}>m/z range</label>
-          <input
-            type="number"
-            step="any"
-            min="0"
-            placeholder={stats?.mzRange ? stats.mzRange[0].toFixed(1) : "start"}
-            value={mzStart}
-            onChange={(e) => setMzStart(e.target.value)}
-            style={{ width: "90px" }}
-            aria-label="m/z start"
+    <>
+      {/* ── Toolbar: view tabs + per-view controls ─────────────────────────── */}
+      <div className="toolbar" data-testid="imaging-panel" aria-label="imaging-panel">
+        <SegmentedControl
+          ariaLabel="View"
+          value={view}
+          onChange={(v) => setView(v as "overview" | "ion" | "multi")}
+          options={[
+            { value: "overview", label: "Overview", icon: <Grid size={13} /> },
+            { value: "ion", label: "Ion Image", icon: <Image size={13} /> },
+            { value: "multi", label: "Multi-channel", icon: <Layers size={13} /> },
+          ]}
+        />
+        <div className="toolbar__sep" />
+
+        {view === "overview" && (
+          <SegmentedControl
+            size="sm"
+            ariaLabel="Overview mode"
+            value={overviewMode}
+            onChange={(v) => setOverviewMode(v as "tic" | "basepeak")}
+            options={
+              basePeakMz
+                ? [
+                    { value: "tic", label: "TIC" },
+                    { value: "basepeak", label: "Base-peak m/z" },
+                  ]
+                : [{ value: "tic", label: "TIC" }]
+            }
           />
-          <span style={{ color: "#666" }}>–</span>
-          <input
-            type="number"
-            step="any"
-            min="0"
-            placeholder={stats?.mzRange ? stats.mzRange[1].toFixed(1) : "end"}
-            value={mzEnd}
-            onChange={(e) => setMzEnd(e.target.value)}
-            style={{ width: "90px" }}
-            aria-label="m/z end"
-          />
-          <span style={{ color: "#888", fontSize: "0.75rem" }}>Da</span>
-          <button
-            onClick={handleRenderIonImage}
-            disabled={isRendering || !rangeValid}
-            style={{
-              background: rangeValid && !isRendering ? "#1565c0" : "#ccc",
-              color: rangeValid && !isRendering ? "#fff" : "#666",
-              border: "none",
-              padding: "0.3rem 0.75rem",
-              borderRadius: "3px",
-              cursor: isRendering ? "wait" : rangeValid ? "pointer" : "not-allowed",
-              fontWeight: 600,
-              opacity: isRendering ? 0.7 : 1,
-            }}
-          >
-            {isRendering ? "Computing…" : "Show Ion Image"}
-          </button>
-        </div>
-        {/* Row 2: rendering options */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
-          <label style={{ fontWeight: 600, minWidth: "5rem", color: "#555", fontSize: "0.8rem" }}>Display</label>
-          <select
+        )}
+
+        {view === "ion" && (
+          <div className="toolbar__group">
+            <span className="toolbar__lbl">m/z</span>
+            <NumberField
+              size="sm"
+              width="84px"
+              type="text"
+              value={mzStart}
+              onChange={setMzStart}
+              ariaLabel="m/z start"
+            />
+            <span style={{ color: "var(--text-faint)" }}>–</span>
+            <NumberField
+              size="sm"
+              width="84px"
+              type="text"
+              value={mzEnd}
+              onChange={setMzEnd}
+              unit="Da"
+              ariaLabel="m/z end"
+            />
+            <Button
+              size="sm"
+              iconLeft={<Image size={14} />}
+              disabled={!rangeValid || isRendering}
+              onClick={handleRenderIonImage}
+            >
+              {isRendering ? "Computing…" : "Show Ion Image"}
+            </Button>
+          </div>
+        )}
+
+        {view === "multi" && (
+          <div className="toolbar__group">
+            {(["r", "g", "b"] as const).map((c, i) => (
+              <span key={c} className="mc-row">
+                <span
+                  className="mc-sw"
+                  style={{ background: `var(--channel-${c})` }}
+                  aria-label={`channel ${c.toUpperCase()}`}
+                />
+                <NumberField
+                  size="sm"
+                  width="78px"
+                  type="text"
+                  value={mcMz[i]}
+                  onChange={(v) => {
+                    const next = [...mcMz] as [string, string, string];
+                    next[i] = v;
+                    setMcMz(next);
+                  }}
+                  ariaLabel={`channel ${c.toUpperCase()} m/z`}
+                />
+              </span>
+            ))}
+            <Button
+              size="sm"
+              iconLeft={<Layers size={14} />}
+              disabled={isRendering}
+              onClick={handleRenderMultiChannel}
+            >
+              {isRendering ? "Computing…" : "Render"}
+            </Button>
+          </div>
+        )}
+
+        <div className="toolbar__spacer" />
+
+        {showColormapCtl && (
+          <SegmentedControl
+            size="sm"
+            ariaLabel="Colormap"
             value={colormap}
-            onChange={(e) => handleColormapSettings(e.target.value as Colormap)}
-            style={{ fontSize: "0.8rem" }}
-            aria-label="colormap"
-          >
-            <option value="viridis">viridis</option>
-            <option value="inferno">inferno</option>
-            <option value="gray">gray</option>
-          </select>
-          <select
-            value={scale}
-            onChange={(e) => handleColormapSettings(colormap, e.target.value as "linear" | "log")}
-            style={{ fontSize: "0.8rem" }}
-            aria-label="scale"
-          >
-            <option value="linear">linear</option>
-            <option value="log">log</option>
-          </select>
-          <select
-            value={String(percentile)}
-            onChange={(e) => handleColormapSettings(colormap, scale, Number(e.target.value))}
-            style={{ fontSize: "0.8rem" }}
-            aria-label="percentile clip"
-          >
-            <option value="0.9">90th pct</option>
-            <option value="0.95">95th pct</option>
-            <option value="0.99">99th pct</option>
-            <option value="0.999">99.9th pct</option>
-          </select>
-          {/* BL-01: TIC normalization toggle */}
-          <label style={{ display: "flex", alignItems: "center", gap: "0.2rem", fontSize: "0.8rem", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={ticNorm}
-              onChange={(e) => setTicNorm(e.target.checked)}
-              aria-label="TIC norm"
-            />
-            TIC norm
-          </label>
-          {/* BL-04: Gaussian smooth */}
-          <label style={{ display: "flex", alignItems: "center", gap: "0.2rem", fontSize: "0.8rem" }}>
-            Smooth σ
-            <input
-              type="number"
-              min={0}
-              max={5}
-              step={0.5}
-              value={smoothSigma}
-              onChange={(e) => setSmoothSigma(Number(e.target.value))}
-              style={{ width: "52px", fontSize: "0.8rem" }}
-              aria-label="smooth sigma"
-            />
-          </label>
-          {/* BL-07: Contrast enhancement */}
-          <label style={{ display: "flex", alignItems: "center", gap: "0.2rem", fontSize: "0.8rem" }}>
-            Contrast
-            <select
-              value={histogramMode}
-              onChange={(e) => setHistogramMode(e.target.value as HistogramMode)}
-              style={{ fontSize: "0.8rem" }}
-              aria-label="contrast mode"
-            >
-              <option value="none">None</option>
-              <option value="equalize">Equalize</option>
-              <option value="clahe">CLAHE</option>
-            </select>
-          </label>
-          {/* BL-05: TIFF export */}
-          {canExportTiff && (
-            <button
+            onChange={(v) => handleColormapSettings(v as Colormap)}
+            options={[
+              { value: "viridis", label: "viridis" },
+              { value: "inferno", label: "inferno" },
+              { value: "gray", label: "gray" },
+            ]}
+          />
+        )}
+
+        {(view === "ion" || view === "multi") && (
+          <>
+            <div className="toolbar__sep" />
+            <Button
+              variant="secondary"
+              size="sm"
+              iconLeft={<Download size={14} />}
+              disabled={!canExportTiff}
               onClick={handleTiffExport}
-              style={{
-                background: "#fff",
-                color: "#1565c0",
-                border: "1px solid #1565c0",
-                padding: "0.2rem 0.5rem",
-                borderRadius: "3px",
-                cursor: "pointer",
-                fontSize: "0.8rem",
-              }}
-              aria-label="download TIFF"
             >
-              ↓ TIFF
-            </button>
-          )}
-        </div>
+              TIFF
+            </Button>
+          </>
+        )}
       </div>
 
-      {/* TIC and ion-image sections: only shown after grid is built */}
-      {!grid && !stats && (
-        <div style={{ color: "#888", fontSize: "0.85rem", padding: "0.5rem 0" }}>
-          Loading image overview… (reading coordinate + TIC columns)
-        </div>
-      )}
-      {!grid && stats && (
-        <div style={{ color: "#555", fontSize: "0.85rem", padding: "0.5rem 0" }}>
-          Overview ready — enter an m/z range and click <strong>Show Ion Image</strong>.
-          {stats.mzRange && (
-            <span style={{ color: "#888" }}>
-              {" "}Dataset range: {stats.mzRange[0].toFixed(1)}–{stats.mzRange[1].toFixed(1)} Da.
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Tab bar: Overview / Ion Image / Multi-channel */}
-      {grid && (
-        <div style={{ display: "flex", gap: 0, border: "1px solid #ccc", borderRadius: 4, overflow: "hidden", fontSize: "0.78rem", marginBottom: "0.4rem", width: "fit-content" }}>
-          <button
-            onClick={() => setMainTab("overview")}
+      {/* ── Stage: the dark data canvas area ───────────────────────────────── */}
+      <div className="stage">
+        {mixedRepresentationWarning && (
+          <div
+            data-testid="tic-mixed-warning"
             style={{
-              padding: "0.2rem 0.6rem",
-              background: mainTab === "overview" ? "#1565c0" : "#fff",
-              color: mainTab === "overview" ? "#fff" : "#333",
-              border: "none",
-              cursor: "pointer",
+              position: "absolute",
+              left: "var(--space-6)",
+              top: "var(--space-6)",
+              color: WARNING,
+              fontSize: "var(--text-xs)",
+              background: "rgba(14,18,22,0.72)",
+              padding: "var(--space-3) var(--space-4)",
+              borderRadius: "var(--radius-sm)",
+              zIndex: 2,
             }}
           >
-            Overview
-          </button>
-          <button
-            onClick={() => setMainTab("ion-image")}
-            style={{
-              padding: "0.2rem 0.6rem",
-              background: mainTab === "ion-image" ? "#1565c0" : "#fff",
-              color: mainTab === "ion-image" ? "#fff" : "#333",
-              border: "none",
-              borderLeft: "1px solid #ccc",
-              cursor: "pointer",
-            }}
-          >
-            Ion Image
-          </button>
-          <button
-            onClick={() => setMainTab("multi-channel")}
-            style={{
-              padding: "0.2rem 0.6rem",
-              background: mainTab === "multi-channel" ? "#1565c0" : "#fff",
-              color: mainTab === "multi-channel" ? "#fff" : "#333",
-              border: "none",
-              borderLeft: "1px solid #ccc",
-              cursor: "pointer",
-            }}
-          >
-            Multi-channel
-          </button>
-        </div>
-      )}
-
-      {/* Overview tab */}
-      {grid && mainTab === "overview" && (
-        <>
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.4rem" }}>
-            <h2 style={{ margin: 0, fontSize: "1rem" }}>Overview</h2>
-            <div style={{ display: "flex", gap: 0, border: "1px solid #ccc", borderRadius: 4, overflow: "hidden", fontSize: "0.78rem" }}>
-              <button
-                onClick={() => setOverviewMode("tic")}
-                style={{
-                  padding: "0.2rem 0.5rem",
-                  background: overviewMode === "tic" ? "#1565c0" : "#fff",
-                  color: overviewMode === "tic" ? "#fff" : "#333",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                TIC
-              </button>
-              {basePeakMz && (
-                <button
-                  onClick={() => setOverviewMode("basepeak")}
-                  style={{
-                    padding: "0.2rem 0.5rem",
-                    background: overviewMode === "basepeak" ? "#1565c0" : "#fff",
-                    color: overviewMode === "basepeak" ? "#fff" : "#333",
-                    border: "none",
-                    borderLeft: "1px solid #ccc",
-                    cursor: "pointer",
-                  }}
-                >
-                  Base Peak m/z
-                </button>
-              )}
-            </div>
-            {overviewMode === "basepeak" && stats?.mzRange && (
-              <span style={{ fontSize: "0.72rem", color: "#666" }}>
-                {stats.mzRange[0].toFixed(0)}–{stats.mzRange[1].toFixed(0)} Da hue scale
-              </span>
-            )}
+            {mixedRepresentationWarning}
           </div>
+        )}
 
-          {mixedRepresentationWarning && (
-            <div
-              data-testid="tic-mixed-warning"
-              style={{ color: WARNING, fontSize: "0.8rem", marginBottom: "0.5rem" }}
-            >
-              {mixedRepresentationWarning}
-            </div>
-          )}
-
-          {overviewMode === "tic" && (tic === null ? (
-            <div data-testid="tic-unavailable" style={{ color: MUTED, fontSize: "0.8rem" }}>
+        {/* Overview · TIC */}
+        {view === "overview" &&
+          overviewMode === "tic" &&
+          (tic === null ? (
+            <div data-testid="tic-unavailable" className="stage__empty">
               TIC not yet available
             </div>
           ) : (
-            <canvas
-              ref={canvasRef}
-              data-testid="tic-canvas"
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
-              onClick={onTicClick}
-              style={{ width: displayWidth, maxWidth: "100%", aspectRatio: cssAspectRatio, imageRendering: "pixelated", cursor: "crosshair", border: "1px solid #ddd" }}
-            />
+            <div className="imgframe">
+              <canvas
+                ref={canvasRef}
+                className="cross"
+                data-testid="tic-canvas"
+                onMouseMove={onMove}
+                onMouseLeave={onLeave}
+                onClick={onTicClick}
+                style={{ aspectRatio: cssAspectRatio }}
+              />
+            </div>
           ))}
 
-          {overviewMode === "basepeak" && (basePeakMz ? (
-            <canvas
-              ref={bpCanvasRef}
-              data-testid="basepeak-canvas"
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
-              onClick={onTicClick}
-              style={{ width: displayWidth, maxWidth: "100%", aspectRatio: cssAspectRatio, imageRendering: "pixelated", cursor: "crosshair", border: "1px solid #ddd" }}
-            />
-          ) : (
-            <div style={{ color: MUTED, fontSize: "0.8rem" }}>Base peak data not available</div>
-          ))}
-
-          <div
-            data-testid="tic-hover-readout"
-            style={{
-              fontSize: "0.8rem",
-              minHeight: "1.2em",
-              marginTop: "0.5rem",
-              color: readout.muted ? MUTED : "#000",
-            }}
-          >
-            {readout.text}
-          </div>
-        </>
-      )}
-
-      {/* Ion Image tab — D-04: only rendered after first Show Ion Image click */}
-      {grid && mainTab === "ion-image" && (
-        <div>
-          {ionImage === null ? (
-            <div style={{ color: MUTED, fontSize: "0.85rem", padding: "0.5rem 0" }}>
-              Enter an m/z range above and click <strong>Show Ion Image</strong>.
+        {/* Overview · Base-peak m/z */}
+        {view === "overview" &&
+          overviewMode === "basepeak" &&
+          (basePeakMz ? (
+            <div className="imgframe">
+              <canvas
+                ref={bpCanvasRef}
+                className="cross"
+                data-testid="basepeak-canvas"
+                onMouseMove={onMove}
+                onMouseLeave={onLeave}
+                onClick={onTicClick}
+                style={{ aspectRatio: cssAspectRatio }}
+              />
             </div>
           ) : (
-            <>
+            <div className="stage__empty">Base peak data not available</div>
+          ))}
+
+        {/* Ion Image */}
+        {view === "ion" &&
+          (ionImage === null ? (
+            <div className="stage__empty">
+              Enter an m/z range above and click Show Ion Image.
+            </div>
+          ) : (
+            <div className="imgframe">
               <canvas
                 ref={ionCanvasRef}
+                className="cross"
                 data-testid="ion-canvas"
                 onMouseMove={onIonMouseMove}
                 onMouseLeave={onIonMouseLeave}
                 onMouseDown={onIonMouseDown}
                 onMouseUp={onIonMouseUp}
-                style={{
-                  width: displayWidth,
-                  maxWidth: "100%",
-                  aspectRatio: cssAspectRatio,
-                  imageRendering: "pixelated",
-                  cursor: "crosshair",
-                  border: "1px solid #ddd",
-                  userSelect: "none",
-                }}
+                style={{ aspectRatio: cssAspectRatio, userSelect: "none" }}
               />
-              {ionReadout.text && (
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    color: ionReadout.muted ? MUTED : undefined,
-                    marginTop: "0.25rem",
-                  }}
-                >
-                  {ionReadout.text}
-                </div>
-              )}
-              {roiIndices && roiIndices.length > 0 && (
-                <div style={{ fontSize: "0.8rem", color: "#555", marginTop: "0.25rem" }}>
-                  ROI: {roiIndices.length} pixel{roiIndices.length !== 1 ? "s" : ""} selected
-                </div>
-              )}
-              {ionImageStats && (
-                <div
-                  data-testid="ion-stats"
-                  style={{ fontSize: "0.8rem", marginTop: "0.5rem" }}
-                >
-                  {ionImageStats.nonzeroCount} / {grid.filledCount} pixels with
-                  signal &middot; range{" "}
-                  {formatCompact(ionImageStats.min)}&ndash;
-                  {formatCompact(ionImageStats.max)} &middot; scale: {scale}{" "}
-                  ({Math.round(percentile * 100)}th pct)
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+            </div>
+          ))}
 
-      {/* Multi-channel tab (BL-02) */}
-      {grid && mainTab === "multi-channel" && (
-        <div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", marginBottom: "0.5rem" }}>
-            {(["R", "G", "B"] as const).map((label, i) => (
-              <div key={label} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.82rem" }}>
-                {/* Color swatch */}
-                <span
-                  aria-label={`channel ${label}`}
-                  style={{
-                    display: "inline-block",
-                    width: "14px",
-                    height: "14px",
-                    borderRadius: "2px",
-                    background: label === "R" ? "#e53935" : label === "G" ? "#43a047" : "#1e88e5",
-                    flexShrink: 0,
-                  }}
-                />
-                <label>{label}</label>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  placeholder="m/z"
-                  value={mcMz[i]}
-                  onChange={(e) => {
-                    const next = [...mcMz] as [string, string, string];
-                    next[i] = e.target.value;
-                    setMcMz(next);
-                  }}
-                  style={{ width: "90px", fontSize: "0.82rem" }}
-                  aria-label={`channel ${label} m/z`}
-                />
-                <span style={{ color: "#888" }}>±</span>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={mcTol[i]}
-                  onChange={(e) => {
-                    const next = [...mcTol] as [string, string, string];
-                    next[i] = e.target.value;
-                    setMcTol(next);
-                  }}
-                  style={{ width: "60px", fontSize: "0.82rem" }}
-                  aria-label={`channel ${label} tolerance`}
-                />
-                <span style={{ color: "#888", fontSize: "0.75rem" }}>Da</span>
-              </div>
-            ))}
-            <button
-              onClick={handleRenderMultiChannel}
-              disabled={isRendering}
-              style={{
-                background: !isRendering ? "#1565c0" : "#ccc",
-                color: !isRendering ? "#fff" : "#666",
-                border: "none",
-                padding: "0.3rem 0.75rem",
-                borderRadius: "3px",
-                cursor: isRendering ? "wait" : "pointer",
-                fontWeight: 600,
-                opacity: isRendering ? 0.7 : 1,
-                alignSelf: "flex-start",
-                marginTop: "0.2rem",
-              }}
-            >
-              {isRendering ? "Computing…" : "Render"}
-            </button>
-          </div>
-
-          {multiChannel?.images ? (
-            <>
+        {/* Multi-channel */}
+        {view === "multi" &&
+          (multiChannel?.images ? (
+            <div className="imgframe">
               <canvas
                 ref={mcCanvasRef}
                 data-testid="mc-canvas"
-                style={{
-                  width: displayWidth,
-                  maxWidth: "100%",
-                  aspectRatio: cssAspectRatio,
-                  imageRendering: "pixelated",
-                  cursor: "default",
-                  border: "1px solid #ddd",
-                }}
+                style={{ aspectRatio: cssAspectRatio }}
               />
-            </>
-          ) : (
-            <div style={{ color: MUTED, fontSize: "0.85rem", padding: "0.5rem 0" }}>
-              Enter m/z values for each channel and click <strong>Render</strong>.
             </div>
-          )}
-        </div>
-      )}
-    </section>
+          ) : (
+            <div className="stage__empty">
+              Enter R/G/B m/z values and Render
+            </div>
+          ))}
+
+        {/* Floating legend (tic / basepeak / ion — not multi) */}
+        {showLegend && (
+          <div className="stage__legend">
+            <ColormapScale
+              colormap={legendColormap}
+              onStage
+              low={bpHasImage ? bpLow : "0"}
+              high={bpHasImage ? bpHigh : "max"}
+            />
+          </div>
+        )}
+
+        {/* Floating hover readout */}
+        {activeReadout.text && (
+          <div className="stage__readout">
+            {view === "overview" ? (
+              <span data-testid="tic-hover-readout">{readout.text}</span>
+            ) : (
+              activeReadout.text
+            )}
+          </div>
+        )}
+        {/* Keep tic-hover-readout in the DOM for the overview view even when
+            the readout text is empty (contract references the testid). */}
+        {view === "overview" && !readout.text && (
+          <span
+            data-testid="tic-hover-readout"
+            style={{ display: "none" }}
+          />
+        )}
+
+        {/* Ion stats + ROI count, surfaced below the readout overlay */}
+        {view === "ion" && (ionImageStats || (roiIndices && roiIndices.length > 0)) && (
+          <div
+            className="stage__readout"
+            style={{ top: "auto", bottom: "var(--space-6)", right: "var(--space-6)" }}
+          >
+            {roiIndices && roiIndices.length > 0 && (
+              <div>
+                ROI: {roiIndices.length} pixel
+                {roiIndices.length !== 1 ? "s" : ""} selected
+              </div>
+            )}
+            {ionImageStats && grid && (
+              <div data-testid="ion-stats">
+                {ionImageStats.nonzeroCount} / {grid.filledCount} px · range{" "}
+                {formatCompact(ionImageStats.min)}–
+                {formatCompact(ionImageStats.max)} · {scale} (
+                {Math.round(percentile * 100)}th pct)
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

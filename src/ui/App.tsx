@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, FolderOpen } from "lucide-react";
+import { PanelLeft, FolderOpen, Settings } from "lucide-react";
 
 import { useStore } from "../state/store";
 import { STAGE_LABEL } from "./stageLabels";
@@ -12,6 +12,7 @@ import { CapabilitiesPanel } from "./CapabilitiesPanel";
 import { GridDiagnosticsPanel } from "./GridDiagnosticsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
+import { SettingsPopover } from "./SettingsPopover";
 import { Badge } from "./ds";
 
 const LOGO = `${import.meta.env.BASE_URL}openms-logo.png`;
@@ -52,6 +53,9 @@ export function App() {
   );
   const [railOpen, setRailOpen] = useState(false); // narrow-screen rail overlay
   const [reopen, setReopen] = useState(false); // "Open file" re-shows the loader
+  const [view, setView] = useState<"overview" | "ion" | "multi">("overview");
+  const [overviewMode, setOverviewMode] = useState<"tic" | "basepeak">("tic");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia(WIDE_QUERY);
@@ -105,6 +109,16 @@ export function App() {
           )}
           <div className="topbar__spacer" />
           <div className="topbar__actions">
+            {hasShell && (
+              <button
+                className="iconbtn"
+                aria-label="Settings"
+                aria-pressed={settingsOpen}
+                onClick={() => setSettingsOpen((v) => !v)}
+              >
+                <Settings size={16} />
+              </button>
+            )}
             {(hasShell || isError) && (
               <button
                 className="iconbtn"
@@ -116,6 +130,10 @@ export function App() {
             )}
           </div>
         </header>
+
+        {settingsOpen && hasShell && (
+          <SettingsPopover onClose={() => setSettingsOpen(false)} />
+        )}
 
         {/* ── Body ──────────────────────────────────────────────────────── */}
         <div className={`body${railVisible && isWide ? "" : " body--norail"}`}>
@@ -145,33 +163,28 @@ export function App() {
 
             {hasShell && (
               <>
-                <div
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    overflow: "auto",
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  {ready && isImaging ? (
-                    <ImagingPanel />
-                  ) : (
-                    <div
-                      style={{
-                        flex: 1,
-                        display: "grid",
-                        placeItems: "center",
-                        padding: "1rem",
-                        color: "var(--text-muted)",
-                        fontSize: "var(--text-sm)",
-                        textAlign: "center",
-                      }}
-                    >
-                      no spatial imaging coordinates — spectrum browser only
-                    </div>
-                  )}
-                </div>
+                {ready && isImaging ? (
+                  <ImagingPanel
+                    view={view}
+                    setView={setView}
+                    overviewMode={overviewMode}
+                    setOverviewMode={setOverviewMode}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "grid",
+                      placeItems: "center",
+                      padding: "1rem",
+                      color: "var(--text-muted)",
+                      fontSize: "var(--text-sm)",
+                      textAlign: "center",
+                    }}
+                  >
+                    no spatial imaging coordinates — spectrum browser only
+                  </div>
+                )}
                 {/* Spectrum dock (P5 applies the rigid 188px + uPlot ResizeObserver). */}
                 <div
                   style={{
