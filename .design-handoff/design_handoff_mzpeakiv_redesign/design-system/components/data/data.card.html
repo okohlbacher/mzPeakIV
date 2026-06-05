@@ -1,0 +1,59 @@
+<!-- @dsCard group="Components" viewport="700x340" name="Data display" subtitle="Badges, stat rows, colormap scale & panel" -->
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  body { margin: 0; padding: 20px 24px; background: var(--bg-app); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+  .card { background: var(--surface); border: 1px solid var(--border-hairline); border-radius: var(--radius-md); }
+  .pad { padding: 6px 14px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 0 12px; }
+  .cmaps { display: flex; flex-direction: column; gap: 14px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js" onerror="window.__dsBundleMissing=true"></script>
+<script src="../../ds-runtime-fallback.js"></script>
+<script type="text/babel">
+  const { Badge, StatRow, ColormapScale, Panel } = window.MzPeakDesignSystem_019e25;
+  function Demo() {
+    return (
+      <div>
+        <div className="row">
+          <Badge tone="success" dot>Ready</Badge>
+          <Badge tone="info">Profile</Badge>
+          <Badge tone="accent">MS 1</Badge>
+          <Badge tone="warning">Mixed</Badge>
+          <Badge tone="danger" dot>Error</Badge>
+          <Badge tone="neutral" mono>1,684</Badge>
+        </div>
+        <div className="cols">
+          <div className="card">
+            <Panel title="Image Info" count="5" defaultOpen>
+              <StatRow label="Dimensions" value={<>260 × 134 <em>px</em></>} />
+              <StatRow label="Spectra" value="1,684" />
+              <StatRow label="m/z range" value={<>85.81 – 799.95 <em>Da</em></>} />
+              <StatRow label="MS levels" value="1, 2" />
+              <StatRow label="Mode" value="564 profile" />
+            </Panel>
+          </div>
+          <div className="cmaps">
+            <ColormapScale colormap="viridis" low="0" high="1.4e6" />
+            <ColormapScale colormap="inferno" low="0" high="max" />
+            <ColormapScale colormap="gray" low="min" high="max" />
+            <ColormapScale colormap="basepeak" low="86" high="800" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>
