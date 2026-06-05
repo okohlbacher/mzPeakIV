@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Grid, Image, Layers, Download } from "lucide-react";
 
 import { useStore } from "../state/store";
@@ -218,7 +218,11 @@ export function ImagingPanel({
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-  }, [tic, grid]);
+    // view + overviewMode deps: the TIC canvas only mounts when the overview
+    // view is active AND overviewMode==="tic". Switching base-peak↔TIC, or
+    // leaving the overview view and returning, remounts a blank canvas; without
+    // these deps the paint effect would not re-run (tic/grid unchanged).
+  }, [tic, grid, view, overviewMode]);
 
   // Selection-ring pass (runs AFTER the paint pass): re-blit, then stroke a 1px
   // contrast ring on the selected cell. Keyed on [selectedIndex, tic, grid].
@@ -247,7 +251,8 @@ export function ImagingPanel({
     ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
-  }, [selectedIndex, tic, grid]);
+    // view + overviewMode: re-blit on remount (same mount-after-data reason).
+  }, [selectedIndex, tic, grid, view, overviewMode]);
 
   // Base-peak m/z overview paint — Option C false-color map.
   useEffect(() => {
@@ -263,7 +268,9 @@ export function ImagingPanel({
     const img = new ImageData(grid.width, grid.height);
     img.data.set(rgba);
     ctx.putImageData(img, 0, 0);
-  }, [basePeakMz, grid, stats]);
+    // view + overviewMode: the base-peak canvas mounts only when active; repaint
+    // on remount (switching TIC↔base-peak or returning to the overview view).
+  }, [basePeakMz, grid, stats, view, overviewMode]);
 
   // Phase 4 — ion image PAINT effect: rasterize the ion image with chosen colormap/scale/percentile.
   // BL-01/04/07: also keyed on [ticNorm, smoothSigma, histogramMode].
@@ -361,6 +368,44 @@ export function ImagingPanel({
     ? `${grid.width * aspect} / ${grid.height}`
     : "1 / 1";
   const base = grid?.coordinateBase ?? 1;
+
+  // Scale the displayed image up to fill the dark stage while preserving aspect
+  // ratio (contain-fit). We measure the stage and set an explicit pixel size on
+  // the canvas ELEMENT — NOT object-fit — so the element box equals the visible
+  // image box and getBoundingClientRect-based hit-testing (toGridCoord) stays
+  // exact. A ResizeObserver tracks rail toggle / dock / window reflows.
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [displaySize, setDisplaySize] = useState<{ w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !grid) return;
+    const ar = (grid.width * aspect) / grid.height; // width / height
+    const fit = () => {
+      const cs = getComputedStyle(stage);
+      const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const availW = Math.max(0, stage.clientWidth - padX);
+      const availH = Math.max(0, stage.clientHeight - padY);
+      if (availW <= 0 || availH <= 0) return;
+      let w = availW;
+      let h = w / ar;
+      if (h > availH) {
+        h = availH;
+        w = h * ar;
+      }
+      setDisplaySize({ w: Math.round(w), h: Math.round(h) });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [grid, aspect]);
+
+  // Explicit pixel size for the active canvas (contain-fit); falls back to the
+  // CSS aspect-ratio box until the first measurement lands.
+  const canvasSizeStyle: React.CSSProperties = displaySize
+    ? { width: displaySize.w, height: displaySize.h }
+    : { aspectRatio: cssAspectRatio, maxWidth: "100%", maxHeight: "100%" };
 
   function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
@@ -775,7 +820,7 @@ export function ImagingPanel({
       </div>
 
       {/* ── Stage: the dark data canvas area ───────────────────────────────── */}
-      <div className="stage">
+      <div className="stage" ref={stageRef}>
         {mixedRepresentationWarning && (
           <div
             data-testid="tic-mixed-warning"
@@ -811,7 +856,7 @@ export function ImagingPanel({
                 onMouseMove={onMove}
                 onMouseLeave={onLeave}
                 onClick={onTicClick}
-                style={{ aspectRatio: cssAspectRatio }}
+                style={canvasSizeStyle}
               />
             </div>
           ))}
@@ -828,7 +873,7 @@ export function ImagingPanel({
                 onMouseMove={onMove}
                 onMouseLeave={onLeave}
                 onClick={onTicClick}
-                style={{ aspectRatio: cssAspectRatio }}
+                style={canvasSizeStyle}
               />
             </div>
           ) : (
@@ -851,7 +896,7 @@ export function ImagingPanel({
                 onMouseLeave={onIonMouseLeave}
                 onMouseDown={onIonMouseDown}
                 onMouseUp={onIonMouseUp}
-                style={{ aspectRatio: cssAspectRatio, userSelect: "none" }}
+                style={{ ...canvasSizeStyle, userSelect: "none" }}
               />
             </div>
           ))}
@@ -863,7 +908,7 @@ export function ImagingPanel({
               <canvas
                 ref={mcCanvasRef}
                 data-testid="mc-canvas"
-                style={{ aspectRatio: cssAspectRatio }}
+                style={canvasSizeStyle}
               />
             </div>
           ) : (
