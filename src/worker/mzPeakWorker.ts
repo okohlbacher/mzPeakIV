@@ -603,7 +603,7 @@ async function readFastSpectrum(index: number): Promise<boolean> {
 
     // Read only the target row group.
     const rawTable = await pf.read({ rowGroups: [targetRG] });
-    rlog(`pf.read done, numRows=${rawTable.numRows}`);
+    rlog(`pf.read done`);
     const table = tableFromIPC(rawTable.intoIPCStream());
     rlog(`Arrow table: ${table.numRows} rows`);
 
