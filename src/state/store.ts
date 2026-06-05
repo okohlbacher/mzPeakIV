@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { type Colormap } from "../ui/rasterize";
 import type { ImagingGrid } from "../imaging/types";
+import type { OpticalImageMeta, DecodedOptical } from "../imaging/optical";
 import type { ReaderErrorClass } from "../reader/errors";
 import type {
   Capabilities,
@@ -73,6 +74,14 @@ type State = {
   meanSpectrum: SpectrumArrays | null;
   /** BL-06: Selected pixel indices for ROI spectrum. */
   roiIndices: number[] | null;
+  /** ADD-01: optical-image descriptive metadata from metadata.imaging.images[]. */
+  opticalImages: OpticalImageMeta[];
+  /** ADD-01: decoded optical pixel data, keyed by archive_path (lazy). */
+  opticalDecoded: Record<string, DecodedOptical>;
+  /** ADD-01: optical decode errors, keyed by archive_path. */
+  opticalErrors: Record<string, string>;
+  /** ADD-01: the optical image currently shown (archive_path), or null. */
+  selectedOpticalPath: string | null;
 };
 
 type Actions = {
@@ -95,6 +104,11 @@ type Actions = {
   // BL-06: ROI spectrum for selected pixels.
   requestRoiSpectrum: (spectrumIndices: number[]) => void;
   clearRoi: () => void;
+  // ADD-01: optical images.
+  /** Select which optical image to display; lazily requests its decode. */
+  setSelectedOpticalPath: (archivePath: string | null) => void;
+  /** Request the worker decode an optical TIFF member (no-op if cached/in-flight). */
+  requestOpticalImage: (archivePath: string) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -192,6 +206,10 @@ const initialState: State = {
   multiChannel: null,
   meanSpectrum: null,
   roiIndices: null,
+  opticalImages: [],
+  opticalDecoded: {},
+  opticalErrors: {},
+  selectedOpticalPath: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -367,6 +385,20 @@ export const useStore = create<State & Actions>((set) => ({
   clearRoi() {
     set({ roiIndices: null });
   },
+
+  // ADD-01: request the worker decode an optical TIFF member. No-op if already
+  // decoded or a decode error was already recorded (avoid re-requesting).
+  requestOpticalImage(archivePath: string) {
+    const s = useStore.getState();
+    if (s.opticalDecoded[archivePath] || s.opticalErrors[archivePath]) return;
+    worker.postMessage({ type: "getOpticalImage", archivePath } satisfies WorkerRequest);
+  },
+
+  // ADD-01: choose the displayed optical image; lazily trigger its decode.
+  setSelectedOpticalPath(archivePath: string | null) {
+    set({ selectedOpticalPath: archivePath });
+    if (archivePath) useStore.getState().requestOpticalImage(archivePath);
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -401,6 +433,11 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       // the message, so the second loadResult (fast overview) doesn't clobber the
       // manifest or capabilities set by the first.
       const prev = useStore.getState();
+      const opticalImages = r.opticalImages ?? prev.opticalImages;
+      // Auto-select the first display-oriented image (skip derived-MS overviews)
+      // so the Optical tab shows something on first open.
+      const firstDisplay =
+        opticalImages.find((im) => im.role !== "derived-MS-image") ?? opticalImages[0];
       useStore.setState({
         manifest: r.manifest ?? prev.manifest,
         fileMeta: r.fileMeta ?? prev.fileMeta,
@@ -411,6 +448,8 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         basePeakMz: r.basePeakMz ?? prev.basePeakMz,
         mixedRepresentationWarning:
           r.mixedRepresentationWarning ?? prev.mixedRepresentationWarning,
+        opticalImages,
+        selectedOpticalPath: prev.selectedOpticalPath ?? firstDisplay?.archivePath ?? null,
         stage: "ready",
         error: null,
         selectedIndex: prev.selectedIndex,
@@ -476,6 +515,26 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
     case "meanSpectrumResult":
       useStore.setState({ meanSpectrum: msg.spectrum });
       break;
+
+    case "opticalImageResult": {
+      // ADD-01: cache the decoded optical pixels keyed by archive_path.
+      const prevOpt = useStore.getState();
+      useStore.setState({
+        opticalDecoded: {
+          ...prevOpt.opticalDecoded,
+          [msg.archivePath]: { width: msg.width, height: msg.height, rgba: msg.rgba },
+        },
+      });
+      break;
+    }
+
+    case "opticalImageError": {
+      const prevOptE = useStore.getState();
+      useStore.setState({
+        opticalErrors: { ...prevOptE.opticalErrors, [msg.archivePath]: msg.message },
+      });
+      break;
+    }
 
     case "error":
       // CRITICAL (Pitfall 7 / T-05-06): isRendering MUST be cleared on error,

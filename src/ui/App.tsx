@@ -8,6 +8,7 @@ import { ProgressBar } from "./ProgressBar";
 import { ErrorBanner } from "./ErrorBanner";
 import { SampleRunPanel } from "./SampleRunPanel";
 import { StatsPanel } from "./StatsPanel";
+import { OpticalPanel } from "./OpticalPanel";
 import { FormatDetailsPanel } from "./FormatDetailsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
@@ -134,6 +135,7 @@ export function App() {
               </div>
               <SampleRunPanel />
               <StatsPanel />
+              <OpticalPanel />
               <SettingsView />
               <FormatDetailsPanel />
             </aside>

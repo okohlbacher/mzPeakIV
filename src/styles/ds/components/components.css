@@ -335,3 +335,45 @@
 .format-details .mz-panel:last-child { border-bottom: none; }
 .format-details .mz-panel__head { padding-block: var(--space-3); }
 .format-details .mz-panel__title { color: var(--text-faint); }
+
+/* Optical-image picker list (ADD-01). Each entry is a selectable card. */
+.optical-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: var(--border-width) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  cursor: pointer;
+}
+.optical-item:last-child { margin-bottom: 0; }
+.optical-item:hover { background: var(--gray-25); }
+.optical-item--active {
+  border-color: var(--accent, var(--text-muted));
+  background: var(--gray-25);
+}
+.optical-item__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.optical-item__name {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Standalone (unregistered) optical image: native aspect, contain-fit. */
+.imgframe--native {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+}

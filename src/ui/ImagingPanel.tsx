@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Grid, Image, Layers, Download, Blend } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Grid, Image, Layers, Download, Blend, Microscope } from "lucide-react";
 
 import { useStore } from "../state/store";
 import {
@@ -7,6 +7,7 @@ import {
   SegmentedControl,
   NumberField,
   ColormapScale,
+  Select,
 } from "./ds";
 import type { View } from "./viewTypes";
 import {
@@ -15,6 +16,7 @@ import {
   rasterizeMultiChannel,
   type Colormap,
 } from "./rasterize";
+import { placeOpticalOnGrid } from "../imaging/optical";
 import {
   encodeSingleChannelTiff,
   encodeRgbTiff,
@@ -147,15 +149,40 @@ export function ImagingPanel({
   const clearRoi = useStore((s) => s.clearRoi);
   const roiIndices = useStore((s) => s.roiIndices);
 
+  // ADD-01: optical images
+  const opticalImages = useStore((s) => s.opticalImages);
+  const opticalDecoded = useStore((s) => s.opticalDecoded);
+  const opticalErrors = useStore((s) => s.opticalErrors);
+  const selectedOpticalPath = useStore((s) => s.selectedOpticalPath);
+  const setSelectedOpticalPath = useStore((s) => s.setSelectedOpticalPath);
+  const requestOpticalImage = useStore((s) => s.requestOpticalImage);
+  const hasOptical = opticalImages.length > 0;
+  const selectedOptical = opticalImages.find((im) => im.archivePath === selectedOpticalPath) ?? null;
+  const decodedOptical = selectedOpticalPath ? (opticalDecoded[selectedOpticalPath] ?? null) : null;
+  const opticalError = selectedOpticalPath ? (opticalErrors[selectedOpticalPath] ?? null) : null;
+  // World-frame placement: resample the optical image into the MS grid via its
+  // affine so it aligns + composites with ion images. null when unregistered.
+  const opticalPlaced = useMemo(
+    () =>
+      decodedOptical && grid && selectedOptical?.affine
+        ? placeOpticalOnGrid(decodedOptical, selectedOptical.affine, grid.width, grid.height)
+        : null,
+    [decodedOptical, grid, selectedOptical],
+  );
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mcCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blendCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const opticalCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Blend view: per-layer opacity (0–1) for the TIC / ion / RGB overlay.
-  const [blendOpacity, setBlendOpacity] = useState<{ tic: number; ion: number; rgb: number }>(
-    { tic: 1, ion: 0.6, rgb: 0 },
-  );
+  // Blend view: per-layer opacity (0–1) for the TIC / ion / RGB / optical overlay.
+  const [blendOpacity, setBlendOpacity] = useState<{
+    tic: number;
+    ion: number;
+    rgb: number;
+    optical: number;
+  }>({ tic: 1, ion: 0.6, rgb: 0, optical: 0 });
 
   // Store the last rasterized ion image RGBA for re-blit during overlays.
   const ionRgbaRef = useRef<Uint8ClampedArray | null>(null);
@@ -341,6 +368,39 @@ export function ImagingPanel({
     // view dependency: same mount-after-data issue as the ion canvas above.
   }, [multiChannel, grid, tic, ticNorm, view]);
 
+  // ADD-01: lazily decode the selected optical image when its tab (or the blend
+  // view, which may composite it) becomes active and it isn't decoded yet.
+  useEffect(() => {
+    if (view !== "optical" && view !== "blend") return;
+    if (!selectedOpticalPath) return;
+    if (opticalDecoded[selectedOpticalPath] || opticalErrors[selectedOpticalPath]) return;
+    requestOpticalImage(selectedOpticalPath);
+  }, [view, selectedOpticalPath, opticalDecoded, opticalErrors, requestOpticalImage]);
+
+  // ADD-01: optical canvas paint. Registered images (affine + grid) are resampled
+  // into the MS grid frame so they align with ion images; unregistered images are
+  // painted at native resolution (standalone, no spatial hit-testing).
+  useEffect(() => {
+    if (view !== "optical") return;
+    const canvas = opticalCanvasRef.current;
+    if (!canvas || !decodedOptical) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    if (opticalPlaced && grid) {
+      canvas.width = grid.width;
+      canvas.height = grid.height;
+      const img = new ImageData(grid.width, grid.height);
+      img.data.set(opticalPlaced);
+      ctx.putImageData(img, 0, 0);
+    } else {
+      canvas.width = decodedOptical.width;
+      canvas.height = decodedOptical.height;
+      const img = new ImageData(decodedOptical.width, decodedOptical.height);
+      img.data.set(decodedOptical.rgba);
+      ctx.putImageData(img, 0, 0);
+    }
+  }, [view, decodedOptical, opticalPlaced, grid]);
+
   // Blend canvas paint — alpha-over the TIC / ion / RGB layers (bottom → top)
   // by their slider opacities onto the dark stage colour.
   useEffect(() => {
@@ -361,6 +421,8 @@ export function ImagingPanel({
       out[i * 4 + 3] = 255;
     }
     const layers: Array<[Uint8ClampedArray, number]> = [];
+    if (opticalPlaced && blendOpacity.optical > 0)
+      layers.push([opticalPlaced, blendOpacity.optical]);
     if (tic && blendOpacity.tic > 0)
       layers.push([rasterizeTic(tic, grid, colormap, scale === "log"), blendOpacity.tic]);
     if (multiChannel?.images && blendOpacity.rgb > 0)
@@ -382,13 +444,16 @@ export function ImagingPanel({
         blendOpacity.ion,
       ]);
 
+    // Effective alpha = slider opacity × per-pixel alpha/255, so a layer's
+    // transparent pixels (e.g. outside the optical footprint) don't paint.
     for (const [rgba, a] of layers) {
-      const inv = 1 - a;
       for (let i = 0; i < n; i++) {
         const o = i * 4;
-        out[o] = rgba[o] * a + out[o] * inv;
-        out[o + 1] = rgba[o + 1] * a + out[o + 1] * inv;
-        out[o + 2] = rgba[o + 2] * a + out[o + 2] * inv;
+        const la = a * (rgba[o + 3] / 255);
+        const inv = 1 - la;
+        out[o] = rgba[o] * la + out[o] * inv;
+        out[o + 1] = rgba[o + 1] * la + out[o + 1] * inv;
+        out[o + 2] = rgba[o + 2] * la + out[o + 2] * inv;
       }
     }
     const img = new ImageData(grid.width, grid.height);
@@ -400,6 +465,7 @@ export function ImagingPanel({
     tic,
     ionImage,
     multiChannel,
+    opticalPlaced,
     grid,
     stats,
     colormap,
@@ -733,12 +799,43 @@ export function ImagingPanel({
           onChange={(v) => setView(v as View)}
           options={[
             { value: "overview", label: "Overview", icon: <Grid size={13} /> },
+            // Optical tab sits right after Overview, shown only when the file
+            // carries embedded optical images (imaging-spec v0.5).
+            ...(hasOptical
+              ? [{ value: "optical", label: "Optical", icon: <Microscope size={13} /> }]
+              : []),
             { value: "ion", label: "Ion Image", icon: <Image size={13} /> },
             { value: "multi", label: "Multi-channel", icon: <Layers size={13} /> },
             { value: "blend", label: "Blend", icon: <Blend size={13} /> },
           ]}
         />
         <div className="toolbar__sep" />
+
+        {view === "optical" && (
+          <div className="toolbar__group">
+            {opticalImages.length > 1 && (
+              <>
+                <span className="toolbar__lbl">Image</span>
+                <Select
+                  size="sm"
+                  ariaLabel="optical image"
+                  value={selectedOpticalPath ?? ""}
+                  onChange={(v) => setSelectedOpticalPath(v)}
+                  options={opticalImages.map((im) => ({
+                    value: im.archivePath,
+                    label: im.sourceName,
+                  }))}
+                />
+              </>
+            )}
+            {selectedOptical && (
+              <span className="toolbar__lbl" style={{ color: "var(--text-faint)" }}>
+                {selectedOptical.role}
+                {selectedOptical.affine ? "" : " · unregistered"}
+              </span>
+            )}
+          </div>
+        )}
 
         {view === "ion" && (
           <div className="toolbar__group">
@@ -812,6 +909,7 @@ export function ImagingPanel({
               ["tic", "TIC", tic !== null],
               ["ion", "Ion", ionImage !== null],
               ["rgb", "RGB", multiChannel?.images != null],
+              ["optical", "Optical", opticalPlaced !== null],
             ] as const).map(([key, label, available]) => (
               <span key={key} className="blend-row" title={available ? "" : "no data for this layer"}>
                 <span className="toolbar__lbl">{label}</span>
@@ -911,6 +1009,43 @@ export function ImagingPanel({
             </div>
           ))}
 
+        {/* Optical image (ADD-01) */}
+        {view === "optical" &&
+          (opticalError ? (
+            <div className="stage__empty" data-testid="optical-error">
+              Could not decode optical image: {opticalError}
+            </div>
+          ) : !decodedOptical ? (
+            <div className="stage__empty" data-testid="optical-loading">
+              {selectedOptical ? "Decoding optical image…" : "No optical image selected"}
+            </div>
+          ) : opticalPlaced && grid ? (
+            // Registered: resampled into the MS grid frame — aligns + hit-tests
+            // like the other images.
+            <div className="imgframe">
+              <canvas
+                ref={opticalCanvasRef}
+                className="cross"
+                data-testid="optical-canvas"
+                onMouseDown={onImgDown}
+                onMouseMove={onImgMove}
+                onMouseUp={onImgUp}
+                onMouseLeave={onImgLeave}
+                style={{ ...canvasSizeStyle, userSelect: "none" }}
+              />
+              {roiOverlay}
+            </div>
+          ) : (
+            // Unregistered: shown standalone at native aspect (no spatial mapping).
+            <div className="imgframe imgframe--native">
+              <canvas
+                ref={opticalCanvasRef}
+                data-testid="optical-canvas"
+                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+              />
+            </div>
+          ))}
+
         {/* Ion Image */}
         {view === "ion" &&
           (ionImage === null ? (
@@ -957,7 +1092,7 @@ export function ImagingPanel({
 
         {/* Blend — opacity overlay of the TIC / ion / RGB layers */}
         {view === "blend" &&
-          (tic || ionImage || multiChannel?.images ? (
+          (tic || ionImage || multiChannel?.images || opticalPlaced ? (
             <div className="imgframe">
               <canvas
                 ref={blendCanvasRef}
@@ -987,8 +1122,10 @@ export function ImagingPanel({
         {/* Zoom control (any image view). Wheel over the stage also zooms. */}
         {(ticHasImage ||
           ionHasImage ||
+          (view === "optical" && !!opticalPlaced) ||
           (view === "multi" && !!multiChannel?.images) ||
-          (view === "blend" && (!!tic || !!ionImage || !!multiChannel?.images))) && (
+          (view === "blend" &&
+            (!!tic || !!ionImage || !!multiChannel?.images || !!opticalPlaced))) && (
           <div className="stage__zoom" role="group" aria-label="Zoom">
             <button className="iconbtn" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
               −

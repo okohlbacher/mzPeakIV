@@ -10,6 +10,7 @@
 // DO NOT: import from ../state/store, instantiate `new Worker(...)` in this file.
 
 import { ZipStorage } from "mzpeakts";
+import { Uint8ArrayWriter } from "@zip.js/zip.js";
 import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
 import { buildMiniParquet, type ColChunk } from "./parquetMini";
@@ -24,6 +25,7 @@ import { computeStats, computeCapabilities } from "../reader/stats";
 import { getSpectrumArraysFor } from "../reader/arrays";
 import { extractCoords, readGridGeometry } from "../reader/scanCoords";
 import { buildImagingGrid } from "../imaging/grid";
+import { parseOpticalImages, decodeTiff } from "../imaging/optical";
 import { buildIonImage, computeIonImageStats } from "../compute/ionImage";
 import { UnsupportedEncodingError } from "../reader/errors";
 import type { WorkerRequest, WorkerResponse } from "./protocol";
@@ -198,6 +200,10 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
     return;
   }
 
+  // ADD-01: parse embedded optical-image metadata from the index JSON (cheap —
+  // already in memory). Pixel data is decoded lazily via getOpticalImage.
+  const opticalImages = parseOpticalImages(store.fileIndex.metadata?.imaging);
+
   // Imaging: send lightweight loadResult immediately, then kick off buildGridFast
   // in the background to populate grid+TIC+stats without waiting for user click.
   send({
@@ -210,6 +216,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
       grid: null,
       tic: null,
       mixedRepresentationWarning: null,
+      opticalImages,
     },
   });
 
@@ -1168,6 +1175,43 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
             { type: "meanSpectrumResult", spectrum: result },
             [result.mz.buffer, result.intensity.buffer],
           );
+        }
+        break;
+      }
+
+      case "getOpticalImage": {
+        // ADD-01: read the optical TIFF ZIP member by name, decode to RGBA, and
+        // transfer the pixel buffer back. Optical images are auxiliary — a missing
+        // member or undecodable blob is a soft error, never fatal to the load.
+        const { archivePath } = msg;
+        try {
+          const store = activeZipStorage;
+          if (!store) throw new Error("no archive open");
+          // zip.js Entry is FileEntry | DirectoryEntry; only file entries have
+          // getData. Narrow to a file entry exposing getData(writer).
+          const entry = store.entries.find((e) => e.filename === archivePath) as
+            | { directory?: boolean; getData?: (w: unknown) => Promise<Uint8Array> }
+            | undefined;
+          if (!entry || entry.directory || typeof entry.getData !== "function")
+            throw new Error(`ZIP member not found: ${archivePath}`);
+          const bytes: Uint8Array = await entry.getData(new Uint8ArrayWriter());
+          const decoded = decodeTiff(bytes);
+          sendTransfer(
+            {
+              type: "opticalImageResult",
+              archivePath,
+              width: decoded.width,
+              height: decoded.height,
+              rgba: decoded.rgba,
+            },
+            [decoded.rgba.buffer],
+          );
+        } catch (err) {
+          send({
+            type: "opticalImageError",
+            archivePath,
+            message: err instanceof Error ? err.message : String(err),
+          });
         }
         break;
       }

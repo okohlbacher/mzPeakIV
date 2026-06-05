@@ -11,6 +11,7 @@
 import type { LoadStage, ManifestEntry, FileMeta, FileStats, Capabilities, UnsupportedFinding, SpectrumArrays } from "../reader/types";
 import type { ReaderErrorClass } from "../reader/errors";
 import type { ImagingGrid } from "../imaging/types";
+import type { OpticalImageMeta } from "../imaging/optical";
 
 // ---------------------------------------------------------------------------
 // Inbound (main thread → Worker)
@@ -47,7 +48,9 @@ export type WorkerRequest =
   // channel, so the result images stay aligned to R/G/B positions.
   | { type: "renderMultiChannel"; channels: (ChannelRequest | null)[]; requestId: number }
   | { type: "meanSpectrum" }
-  | { type: "roiSpectrum"; spectrumIndices: number[] };
+  | { type: "roiSpectrum"; spectrumIndices: number[] }
+  // ADD-01: lazily decode an embedded optical TIFF (ZIP member) to RGBA.
+  | { type: "getOpticalImage"; archivePath: string };
 
 // ---------------------------------------------------------------------------
 // Outbound (Worker → main thread)
@@ -83,6 +86,9 @@ export type WorkerResponse =
   | { type: "spectrumResult"; spectrum: SpectrumArrays }
   | { type: "multiChannelResult"; channels: (Float32Array | null)[]; requestId: number }
   | { type: "meanSpectrumResult"; spectrum: SpectrumArrays }
+  // ADD-01: decoded optical image (native pixel grid, RGBA) or a decode failure.
+  | { type: "opticalImageResult"; archivePath: string; width: number; height: number; rgba: Uint8ClampedArray }
+  | { type: "opticalImageError"; archivePath: string; message: string }
   | {
       type: "error";
       class: ReaderErrorClass;
@@ -129,6 +135,12 @@ export type LoadResult = {
    * Null when grid is not yet built or metadata columns are unavailable.
    */
   basePeakMz?: Float32Array | null;
+  /**
+   * ADD-01 / imaging-spec v0.5: descriptive metadata for embedded optical images
+   * (TIFF ZIP members), parsed from `metadata.imaging.images[]`. The pixel data
+   * is decoded lazily on demand via the getOpticalImage request. [] when none.
+   */
+  opticalImages?: OpticalImageMeta[];
 };
 
 /**
