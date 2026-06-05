@@ -36,6 +36,10 @@ export function SpectrumPanel() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
   const mzWindowRef = useRef<{ mz: number; tolDa: number } | null>(null);
+  // Keep renderIonImage reachable from the one-time uPlot click closure without
+  // recreating the plot (Zustand action ref is stable; ref keeps it fresh).
+  const renderIonImageRef = useRef(renderIonImage);
+  renderIonImageRef.current = renderIonImage;
 
   const numSpectra = stats?.numSpectra ?? 0;
 
@@ -95,10 +99,20 @@ export function SpectrumPanel() {
     const el = containerRef.current;
     if (!el) return;
 
-    const opts: uPlot.Options = {
+    // Measure the plot container so uPlot fills the dock (header above, peak
+    // table below for centroid). Falls back to sensible defaults pre-layout.
+    const measure = () => ({
       width: el.clientWidth || 600,
-      height: 150,
-      title: undefined, // title shown in the section heading instead
+      height: Math.max(el.clientHeight || 0, 96),
+    });
+    const sans = "11px 'IBM Plex Sans', system-ui";
+    const mono = "10px 'IBM Plex Mono', ui-monospace, monospace";
+    const init = measure();
+
+    const opts: uPlot.Options = {
+      width: init.width,
+      height: init.height,
+      title: undefined, // title shown in the dock heading instead
       scales: { x: { time: false } },
       series: [
         {
@@ -107,9 +121,9 @@ export function SpectrumPanel() {
         },
         {
           label: "Intensity",
-          stroke: "#1565c0",
-          fill: "rgba(21,101,192,0.08)",
-          width: 1.5,
+          stroke: "var(--spectrum-line, #3b54da)",
+          fill: "var(--spectrum-fill, rgba(59,84,218,0.09))",
+          width: 1.4,
           points: { show: false },
           value: (_u, v) => fmtIntensity(v),
         },
@@ -117,8 +131,9 @@ export function SpectrumPanel() {
       axes: [
         {
           label: "m/z",
-          labelFont: "11px system-ui",
-          font: "10px system-ui",
+          labelFont: sans,
+          font: mono,
+          stroke: "var(--text-muted, #6b757e)",
           labelSize: 18,
           size: 38,
           values: (_u, ticks) =>
@@ -126,14 +141,15 @@ export function SpectrumPanel() {
         },
         {
           label: "Intensity",
-          labelFont: "11px system-ui",
-          font: "10px system-ui",
+          labelFont: sans,
+          font: mono,
+          stroke: "var(--text-muted, #6b757e)",
           labelSize: 18,
           size: 52,
           values: (_u, ticks) => (ticks ?? []).map((t) => fmtIntensity(t)),
         },
       ],
-      padding: [4, 8, 0, 0],
+      padding: [6, 10, 0, 0],
       cursor: { show: true },
       hooks: {
         draw: [
@@ -144,7 +160,7 @@ export function SpectrumPanel() {
             const xHi = u.valToPos(w.mz + w.tolDa, "x", true);
             const { ctx } = u;
             ctx.save();
-            ctx.fillStyle = "rgba(255,200,0,0.25)";
+            ctx.fillStyle = "rgba(255,200,0,0.25)"; // --warning-band
             ctx.fillRect(xLo, u.bbox.top, xHi - xLo, u.bbox.height);
             ctx.restore();
           },
@@ -160,41 +176,33 @@ export function SpectrumPanel() {
     plotRef.current = plot;
 
     // BL-09: clicking the chart fires renderIonImage for the clicked m/z.
-    // `plot.over` is the transparent overlay element uPlot renders on top of
-    // the canvas — it handles cursor/selection events and accepts our click.
+    // `plot.over` is the transparent overlay uPlot renders over the canvas.
+    // Call through the ref so the latest store action is always used.
     plot.over.addEventListener("click", (e: MouseEvent) => {
       const mz = plot.posToVal(e.offsetX, "x");
       if (Number.isFinite(mz) && mz > 0) {
         const tolDa = mzWindowRef.current?.tolDa ?? 0.3;
-        renderIonImage(mz, tolDa);
+        renderIonImageRef.current(mz, tolDa);
       }
     });
 
-    const onResize = () => {
-      if (containerRef.current) {
-        plot.setSize({ width: containerRef.current.clientWidth || 600, height: 150 });
-      }
-    };
-    window.addEventListener("resize", onResize);
+    // ResizeObserver tracks the dock reflow (rail toggle, responsive, font load)
+    // — there was no observer before; window-resize alone missed flex reflows
+    // with no viewport change. setSize with measured width AND height.
+    const ro = new ResizeObserver(() => {
+      const { width, height } = measure();
+      if (width > 0 && height > 0) plot.setSize({ width, height });
+    });
+    ro.observe(el);
+
     return () => {
-      window.removeEventListener("resize", onResize);
+      ro.disconnect();
       plot.destroy();
       plotRef.current = null;
     };
-    // renderIonImage is stable (Zustand action ref never changes), but we can't
-    // list it as a dep without recreating the plot on every render.  Use a ref
-    // to keep the closure fresh without triggering recreations.
+    // renderIonImage is read via renderIonImageRef; mount-once is intentional.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Keep renderIonImage accessible inside the click handler via a ref so the
-  // uPlot closure created in the one-time effect always calls the latest version.
-  const renderIonImageRef = useRef(renderIonImage);
-  useEffect(() => {
-    renderIonImageRef.current = renderIonImage;
-  }, [renderIonImage]);
-
-  // Also keep mzWindowRef up to date (already synced below) — no extra work needed.
 
   // Update data when active spectrum changes (BL-03: also updates on meanSpectrum)
   useEffect(() => {
@@ -252,158 +260,118 @@ export function SpectrumPanel() {
     <section
       aria-label="spectrum-panel"
       data-testid="spectrum-panel"
-      style={{
-        flexShrink: 0,
-        padding: "0.4rem 0.5rem 0.2rem",
-        borderBottom: "1px solid #ddd",
-        background: "#fafafa",
-      }}
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
     >
-      {/* Compact header row: heading + index picker + mean button + peak count */}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.2rem", flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "0.85rem", color: "#333" }}>{heading}</strong>
+      {/* Dock header: heading + sub-meta + index picker + mean toggle */}
+      <div className="dock__head">
+        <span className="dock__title">{heading}</span>
+
+        {activeSpectrum && (
+          <span className="dock__meta">
+            {activeSpectrum.mz.length.toLocaleString()} pts · {activeSpectrum.id}
+          </span>
+        )}
+        {!activeSpectrum && numSpectra > 0 && (
+          <span className="dock__meta" style={{ color: "var(--text-faint)" }}>
+            click a pixel or enter an index
+          </span>
+        )}
+
+        <span className="dock__spacer" />
 
         {numSpectra > 0 && (
-          <span style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.8rem" }}>
-            <label htmlFor="spectrum-index" style={{ color: "#666" }}>
-              index
-            </label>
-            <input
-              id="spectrum-index"
-              data-testid="spectrum-index"
-              type="number"
-              min={0}
-              max={Math.max(numSpectra - 1, 0)}
-              value={selectedIndex ?? 0}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (Number.isFinite(v) && v >= 0 && v < numSpectra)
-                  void selectSpectrum(v);
-              }}
-              style={{ width: "60px", padding: "0.1rem 0.25rem", fontSize: "0.8rem" }}
-            />
-            <span style={{ color: "#888", fontSize: "0.75rem" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-3)" }}>
+            <label htmlFor="spectrum-index" className="dock__meta">index</label>
+            <span className="mz-input mz-input--sm" style={{ width: 72 }}>
+              <input
+                id="spectrum-index"
+                data-testid="spectrum-index"
+                type="number"
+                min={0}
+                max={Math.max(numSpectra - 1, 0)}
+                value={selectedIndex ?? 0}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v >= 0 && v < numSpectra)
+                    void selectSpectrum(v);
+                }}
+              />
+            </span>
+            <span className="dock__meta" style={{ color: "var(--text-faint)" }}>
               / {numSpectra.toLocaleString()}
             </span>
           </span>
         )}
 
-        {/* BL-03: Mean spectrum button */}
         {numSpectra > 0 && (
           <button
             data-testid="mean-spectrum-btn"
+            className={`mz-btn mz-btn--sm${isMeanActive ? "" : " mz-btn--secondary"}`}
             onClick={handleMeanClick}
-            title="Compute and display mean spectrum across all pixels"
-            style={{
-              fontSize: "0.75rem",
-              padding: "0.1rem 0.45rem",
-              cursor: "pointer",
-              background: isMeanActive ? "#1565c0" : "#e8eaf6",
-              color: isMeanActive ? "#fff" : "#333",
-              border: "1px solid " + (isMeanActive ? "#1565c0" : "#9fa8da"),
-              borderRadius: "3px",
-              lineHeight: "1.4",
-            }}
+            title="Compute and display the mean spectrum across all pixels"
           >
             ⌀ Mean
           </button>
         )}
-
-        {/* BL-03: Dismiss mean spectrum */}
         {isMeanActive && (
           <button
             data-testid="mean-spectrum-dismiss"
+            className="mz-btn mz-btn--sm mz-btn--ghost"
             onClick={handleDismissMean}
             title="Dismiss mean spectrum"
-            style={{
-              fontSize: "0.75rem",
-              padding: "0.1rem 0.35rem",
-              cursor: "pointer",
-              background: "#fce4ec",
-              color: "#c62828",
-              border: "1px solid #ef9a9a",
-              borderRadius: "3px",
-              lineHeight: "1.4",
-            }}
+            aria-label="Dismiss mean spectrum"
           >
             ×
           </button>
         )}
-
-        {activeSpectrum && (
-          <span style={{ color: "#555", fontSize: "0.75rem", marginLeft: "auto" }}>
-            {activeSpectrum.mz.length.toLocaleString()} peaks · {activeSpectrum.id}
-          </span>
-        )}
-
-        {!activeSpectrum && numSpectra > 0 && (
-          <span style={{ color: "#aaa", fontSize: "0.75rem" }}>
-            Click a pixel or enter an index
-          </span>
-        )}
       </div>
 
-      {/* uPlot chart */}
-      <div ref={containerRef} data-testid="spectrum-plot" />
+      {/* uPlot chart — flex:1 so the ResizeObserver measures a real height. */}
+      <div
+        ref={containerRef}
+        data-testid="spectrum-plot"
+        className="dock__plot"
+        style={{ minHeight: 110 }}
+      />
 
       {/* BL-08: Peak table (centroid mode only) */}
       {isCentroid && peakRows.length > 0 && (
-        <div style={{ marginTop: "0.4rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.2rem" }}>
-            <span style={{ fontSize: "0.75rem", color: "#555", fontWeight: 600 }}>
-              Top peaks
-            </span>
+        <div className="mz-scroll" style={{ flexShrink: 0, maxHeight: 120, overflow: "auto", marginTop: "var(--space-3)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", marginBottom: "var(--space-2)" }}>
+            <span className="mz-overline">Top peaks</span>
             <button
               data-testid="copy-csv-btn"
+              className="mz-btn mz-btn--ghost mz-btn--sm"
               onClick={handleCopyCSV}
               title="Copy all peaks as CSV"
-              style={{
-                fontSize: "0.7rem",
-                padding: "0.05rem 0.3rem",
-                cursor: "pointer",
-                background: "#f5f5f5",
-                color: "#555",
-                border: "1px solid #ccc",
-                borderRadius: "3px",
-              }}
             >
               Copy CSV
             </button>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table
-              data-testid="peak-table"
-              style={{
-                borderCollapse: "collapse",
-                fontSize: "0.72rem",
-                width: "100%",
-                tableLayout: "fixed",
-              }}
-            >
-              <thead>
-                <tr style={{ background: "#e8eaf6" }}>
-                  <th style={thStyle}>m/z</th>
-                  <th style={thStyle}>Intensity</th>
-                  <th style={thStyle}>Rel%</th>
+          <table
+            data-testid="peak-table"
+            style={{ borderCollapse: "collapse", fontSize: "var(--text-2xs)", width: "100%", tableLayout: "fixed" }}
+          >
+            <thead>
+              <tr>
+                <th style={thStyle}>m/z</th>
+                <th style={thStyle}>Intensity</th>
+                <th style={thStyle}>Rel%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {peakRows.map((row, i) => (
+                <tr key={i}>
+                  <td style={tdStyle}>{row.mz.toFixed(4)}</td>
+                  <td style={tdStyle}>{fmtIntensity(row.intensity)}</td>
+                  <td style={tdStyle}>{row.rel.toFixed(1)}%</td>
                 </tr>
-              </thead>
-              <tbody>
-                {peakRows.map((row, i) => (
-                  <tr
-                    key={i}
-                    style={{ background: i % 2 === 0 ? "#fff" : "#f9f9fb" }}
-                  >
-                    <td style={tdStyle}>{row.mz.toFixed(4)}</td>
-                    <td style={tdStyle}>{fmtIntensity(row.intensity)}</td>
-                    <td style={tdStyle}>{row.rel.toFixed(1)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
           {extraPeakCount > 0 && (
-            <div style={{ fontSize: "0.7rem", color: "#888", marginTop: "0.15rem", textAlign: "right" }}>
-              ... {extraPeakCount.toLocaleString()} more peaks
+            <div style={{ fontSize: "var(--text-2xs)", color: "var(--text-faint)", marginTop: "var(--space-1)", textAlign: "right" }}>
+              … {extraPeakCount.toLocaleString()} more peaks
             </div>
           )}
         </div>
@@ -414,16 +382,18 @@ export function SpectrumPanel() {
 
 const thStyle: React.CSSProperties = {
   textAlign: "right",
-  padding: "0.1rem 0.35rem",
+  padding: "var(--space-1) var(--space-3)",
   fontWeight: 600,
-  color: "#3949ab",
-  borderBottom: "1px solid #c5cae9",
+  fontFamily: "var(--font-mono)",
+  color: "var(--indigo-600)",
+  borderBottom: "1px solid var(--border-soft)",
   whiteSpace: "nowrap",
 };
 
 const tdStyle: React.CSSProperties = {
   textAlign: "right",
-  padding: "0.07rem 0.35rem",
+  padding: "var(--space-1) var(--space-3)",
+  fontFamily: "var(--font-mono)",
   fontVariantNumeric: "tabular-nums",
-  color: "#333",
+  color: "var(--text-body)",
 };

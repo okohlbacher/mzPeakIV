@@ -70,10 +70,12 @@ export function FileLoader({ loading }: Props) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)", width: "100%" }}>
       {/* ── Drag-and-drop zone ── */}
       <div
+        className="drop"
         data-testid="drop-zone"
+        data-over={dragOver || undefined}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -85,20 +87,11 @@ export function FileLoader({ loading }: Props) {
           if ((e.key === "Enter" || e.key === " ") && !loading)
             fileInputRef.current?.click();
         }}
-        style={{
-          border: `2px dashed ${dragOver ? "#1565c0" : "#bbb"}`,
-          borderRadius: "6px",
-          padding: "1rem",
-          textAlign: "center",
-          background: dragOver ? "#e3f2fd" : "#fafafa",
-          color: dragOver ? "#1565c0" : "#888",
-          cursor: loading ? "not-allowed" : "pointer",
-          transition: "border-color 0.15s, background 0.15s",
-          fontSize: "0.85rem",
-        }}
+        style={loading ? { cursor: "not-allowed", opacity: 0.6 } : undefined}
       >
-        Drop a <strong>.mzpeak</strong> file here, or{" "}
-        <span style={{ textDecoration: "underline" }}>browse</span>
+        <span>
+          Drop a <strong>.mzpeak</strong> file here, or <strong>browse</strong>
+        </span>
       </div>
 
       {/* Hidden file input — activated by the drop zone click handler above.
@@ -114,24 +107,23 @@ export function FileLoader({ loading }: Props) {
         aria-label="mzpeak-file"
       />
 
-      {/* ── URL input ── */}
-      <form
-        onSubmit={onUrlSubmit}
-        style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
-      >
-        <input
-          data-testid="url-input"
-          type="text"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://…/file.mzpeak"
-          disabled={loading}
-          style={{ flex: 1, padding: "0.35rem" }}
-          aria-label="mzpeak-url"
-        />
+      {/* ── URL row ── */}
+      <form className="loader__url" onSubmit={onUrlSubmit}>
+        <span className="mz-input">
+          <input
+            data-testid="url-input"
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…/file.mzpeak"
+            disabled={loading}
+            aria-label="mzpeak-url"
+          />
+        </span>
         <button
           data-testid="load-button"
           type="submit"
+          className="mz-btn mz-btn--secondary"
           disabled={loading || !url.trim()}
         >
           {loading ? "Loading…" : "Load URL"}

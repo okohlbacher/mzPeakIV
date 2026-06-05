@@ -185,15 +185,12 @@ export function App() {
                     no spatial imaging coordinates — spectrum browser only
                   </div>
                 )}
-                {/* Spectrum dock (P5 applies the rigid 188px + uPlot ResizeObserver). */}
+                {/* Spectrum dock — fixed-height frame; SpectrumPanel's uPlot
+                    ResizeObserver measures the flex plot area within it. Height
+                    grows a little when the centroid peak table is present. */}
                 <div
-                  style={{
-                    flexShrink: 0,
-                    maxHeight: 240,
-                    overflow: "auto",
-                    borderTop: "1px solid var(--border-hairline)",
-                    background: "var(--surface)",
-                  }}
+                  className="dock"
+                  style={{ height: "auto", minHeight: "var(--shell-spectrum-h)", maxHeight: 320 }}
                 >
                   <SpectrumPanel />
                 </div>
