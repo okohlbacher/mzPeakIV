@@ -571,7 +571,7 @@ async function initReaderAndGrid(): Promise<boolean> {
  * Total data read: 208 KB (vs 553 MB for full reader init). ~10-30× faster.
  */
 /** How many independent reader handles overlap row-group fetches (network-bound). */
-const RG_CONCURRENCY = 12;
+const RG_CONCURRENCY = 4;
 
 /**
  * Stream every row group of spectra_data.parquet, invoking `onTable` for each.
