@@ -226,11 +226,31 @@ describe("store onmessage handler — WorkerResponse routing", () => {
       intensity: Float32Array.from([10, 20, 30]),
     };
 
-    simulateWorkerMessage({ type: "spectrumResult", spectrum });
+    // Drive a real selection so the result carries the live selectId; the worker
+    // echoes it and the store only applies a matching (non-stale) response.
+    mockPostMessage.mockClear();
+    useStore.getState().selectSpectrum(3);
+    const req = mockPostMessage.mock.calls
+      .map((c) => c[0])
+      .find((m) => m?.type === "selectSpectrum");
+    simulateWorkerMessage({ type: "spectrumResult", spectrum, selectId: req.selectId });
 
     const state = useStore.getState();
     expect(state.selectedIndex).toBe(3);
     expect(state.selectedSpectrum).toBe(spectrum);
+  });
+
+  it("spectrumResult with a stale selectId is discarded", () => {
+    const spectrum = {
+      index: 9,
+      id: "spectrum-9",
+      mz: Float64Array.from([1, 2]),
+      intensity: Float32Array.from([3, 4]),
+    };
+    useStore.getState().selectSpectrum(9); // bumps the live selectId
+    simulateWorkerMessage({ type: "spectrumResult", spectrum, selectId: -1 });
+    // Stale id (-1) → ignored; selectedSpectrum stays null from the reset.
+    expect(useStore.getState().selectedSpectrum).toBeNull();
   });
 
   it("error message sets stage:error and clears isRendering (Pitfall 7 / T-05-06)", () => {

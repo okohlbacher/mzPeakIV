@@ -67,6 +67,11 @@ function sendTransfer(message: WorkerResponse, transfer: Transferable[]): void {
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let activeZipStorage: ZipStorage<any> | null = null;
+// Bumped on every runFastLoad. Async background work (the deferred buildGridFast
+// loadResult) captures the value at start and refuses to post once superseded by
+// a newer load, so a slow background grid can't bleed into a freshly opened file
+// (Codex r4-#2).
+let loadSeq = 0;
 let activeReader: Reader | null = null;
 let activeStats: FileStats | null = null;
 let activeGrid: ImagingGrid | null = null;
@@ -180,6 +185,7 @@ function pointVecs(table: any): { si: any; mz: any; inten: any } | null {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function runFastLoad(store: ZipStorage<any>): Promise<void> {
+  const mySeq = ++loadSeq; // capture this load's generation for async self-guards
   const manifest = manifestFromStore(store);
   const isImaging = store.fileIndex.metadata?.imaging?.is_imaging === true;
 
@@ -213,6 +219,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
         const fileMeta = readFileMeta(reader);
         const stats = computeStats(reader, manifestEntries);
         const fullCaps = computeCapabilities(reader, manifestEntries);
+        if (mySeq !== loadSeq) return; // superseded by a newer load
         activeReader = reader;
         activeStats = stats;
         send({
@@ -255,6 +262,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
   // When complete, sends a second loadResult with grid+tic+stats so the TIC
   // image appears automatically without the user clicking "Show Ion Image".
   buildGridFast().then((result) => {
+    if (mySeq !== loadSeq) return; // superseded by a newer load — drop stale grid
     if (!result || !activeZipStorage) return;
     const tic: Float32Array | null = result.tic ?? null;
     const transferList: Transferable[] = [];
@@ -326,11 +334,11 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       "spectrum.MS_1000528_lowest_observed_mz_unit_MS_1000040": 5,
     };
 
-    const chunks: ColChunk[] = [];
-    for (const path of targetPaths) {
+    // Fetch one column's compressed chunk by schema path, or null when absent.
+    const fetchChunk = async (path: string[]): Promise<ColChunk | null> => {
       const dotPath = path.join(".");
       const colInfo = colInfoMap.get(dotPath);
-      if (!colInfo) { continue; }
+      if (!colInfo) return null;
       const fetchStart = colInfo.dictPageOffset > 0
         ? Math.min(colInfo.dictPageOffset, colInfo.dataPageOffset)
         : colInfo.dataPageOffset;
@@ -340,7 +348,7 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       const enc = colInfo.encodings.length > 0
         ? colInfo.encodings
         : (colInfo.dictPageOffset > 0 ? [0, 3, 8] : [0, 3]);
-      chunks.push({
+      return {
         path,
         parquetType: colInfo.parquetType > 0 ? colInfo.parquetType : (pathTypes[dotPath] ?? 5),
         codec: colInfo.codec,
@@ -349,7 +357,13 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
         numValues: colInfo.numValues || 0,
         uncompressedSize: colInfo.uncompressedSize,
         dataPageOffsetInChunk,
-      });
+      };
+    };
+
+    const chunks: ColChunk[] = [];
+    for (const path of targetPaths) {
+      const c = await fetchChunk(path);
+      if (c) chunks.push(c);
     }
     if (chunks.length < 2) { return null; }
 
@@ -378,15 +392,47 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       if (hi > globalMaxMz) globalMaxMz = hi;
     }
 
-    const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
+    // spectrumIndices[r] = the joined spectrum index for scan row r (Pattern 1).
+    // Default to row order, then override from the source_index column when it can
+    // be read — scan rows are NOT guaranteed in spectrum order (Codex r4-#1). The
+    // read is ISOLATED in its own mini-Parquet + try/catch so any decode issue
+    // falls back to row order rather than breaking the whole grid build.
     const spectrumIndices = Array.from({ length: nRows }, (_, i) => i);
-    // Read geometry from fileIndex.metadata.imaging (coordinate_base, pixel counts)
+    try {
+      const siChunk = await fetchChunk(["scan", "source_index"]);
+      if (siChunk && siChunk.numValues >= nRows) {
+        const siTable = tableFromIPC(
+          readParquet(buildMiniParquet([siChunk], siChunk.numValues)).intoIPCStream(),
+        );
+        const mapped: number[] = new Array(nRows);
+        let ok = siTable.numRows >= nRows;
+        for (let r = 0; ok && r < nRows; r++) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const row = siTable.get(r) as any;
+          const n = Number(row?.scan?.source_index ?? row?.source_index);
+          if (Number.isFinite(n) && n >= 0) mapped[r] = n;
+          else ok = false;
+        }
+        if (ok) for (let r = 0; r < nRows; r++) spectrumIndices[r] = mapped[r];
+      }
+    } catch {
+      /* keep row-order fallback */
+    }
+
+    const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
+    // Read geometry from fileIndex.metadata.imaging (coordinate_base, pixel counts).
+    // Accept both the nested `pixel_count: {x,y}` discovery-block form (used by the
+    // full reader + tests) and the legacy flat pixel_count_x/y (Codex r4-#4).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const imgMeta = (activeZipStorage?.fileIndex?.metadata?.imaging ?? {}) as any;
+    const pc = imgMeta?.pixel_count;
+    const pcX = Number(pc?.x ?? imgMeta?.pixel_count_x);
+    const pcY = Number(pc?.y ?? imgMeta?.pixel_count_y);
     const geometry = imgMeta ? {
-      pixelCount: (imgMeta.pixel_count_x && imgMeta.pixel_count_y)
-        ? { x: imgMeta.pixel_count_x as number, y: imgMeta.pixel_count_y as number }
-        : null,
+      pixelCount:
+        Number.isFinite(pcX) && Number.isFinite(pcY) && pcX > 0 && pcY > 0
+          ? { x: pcX, y: pcY }
+          : null,
       pixelSizeUm: null,
       coordinateBase: (imgMeta.coordinate_base as number) ?? 1,
       geometrySource: "discovery-block" as const,
@@ -631,7 +677,7 @@ async function computeMultiIonImagesFast(
  * This is used when activeReader is null (before the full 553 MB metadata
  * read has been triggered) so pixel clicks are responsive from the start.
  */
-async function readFastSpectrum(index: number): Promise<boolean> {
+async function readFastSpectrum(index: number, selectId: number): Promise<boolean> {
   if (!activeZipStorage) return false;
   try {
     const pf = await openSpectraDataParquet();
@@ -703,7 +749,7 @@ async function readFastSpectrum(index: number): Promise<boolean> {
     };
 
     sendTransfer(
-      { type: "spectrumResult", spectrum },
+      { type: "spectrumResult", spectrum, selectId },
       [mzArr.buffer, intArr.buffer],
     );
     return true;
@@ -914,7 +960,7 @@ async function _computeMeanSpectrumFrom(
 // selectSpectrum helper — shared by both load path and explicit selectSpectrum msg
 // ---------------------------------------------------------------------------
 
-async function runSelectSpectrum(index: number): Promise<void> {
+async function runSelectSpectrum(index: number, selectId: number): Promise<void> {
   if (!activeReader) return;
   try {
     const meta = spectrumMeta(activeReader, index);
@@ -928,7 +974,7 @@ async function runSelectSpectrum(index: number): Promise<void> {
       spectrum.mz.buffer,
       spectrum.intensity.buffer,
     ];
-    sendTransfer({ type: "spectrumResult", spectrum }, transferList);
+    sendTransfer({ type: "spectrumResult", spectrum, selectId }, transferList);
   } catch (err) {
     postError(err);
   }
@@ -1043,7 +1089,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
           // Fast path: read from spectra_data.parquet using row-group skipping.
           // ~12 MB per spectrum vs 553 MB for full reader init. Works immediately
           // after the fast overview builds the grid.
-          const ok = await readFastSpectrum(msg.index);
+          const ok = await readFastSpectrum(msg.index, msg.selectId);
           if (ok) break; // spectrum sent — skip full reader init for now
           // Fast path failed — fall through to full reader init (slow but reliable)
           if (activeZipStorage) {
@@ -1057,7 +1103,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
             }
           }
         }
-        await runSelectSpectrum(msg.index);
+        await runSelectSpectrum(msg.index, msg.selectId);
         break;
       }
 

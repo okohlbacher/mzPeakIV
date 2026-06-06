@@ -43,7 +43,9 @@ export type WorkerRequest =
   | { type: "loadUrl"; url: string }
   | { type: "loadFile"; bytes: ArrayBuffer; name: string }
   | { type: "renderIonImage"; mz: number; tolDa: number; requestId: number }
-  | { type: "selectSpectrum"; index: number }
+  // selectId monotonically orders rapid clicks; the worker echoes it so the main
+  // thread can discard out-of-order / superseded spectrum responses.
+  | { type: "selectSpectrum"; index: number; selectId: number }
   // channels is position-aligned (length up to 3); a null entry = disabled
   // channel, so the result images stay aligned to R/G/B positions.
   | { type: "renderMultiChannel"; channels: (ChannelRequest | null)[]; requestId: number }
@@ -85,7 +87,7 @@ export type WorkerResponse =
       stats: IonImageStats | null;
       requestId: number;
     }
-  | { type: "spectrumResult"; spectrum: SpectrumArrays }
+  | { type: "spectrumResult"; spectrum: SpectrumArrays; selectId: number }
   | { type: "multiChannelResult"; channels: (Float32Array | null)[]; requestId: number }
   | { type: "meanSpectrumResult"; spectrum: SpectrumArrays }
   // ADD-01: decoded optical image (native pixel grid, RGBA) or a decode failure.

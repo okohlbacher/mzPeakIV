@@ -228,6 +228,10 @@ let currentMcChannels: (ChannelRequest | null)[] = [];
 // it's distinct from currentRequestId). Optical decode requests carry it and the
 // worker echoes it; results from a previous file are dropped on mismatch.
 let currentLoadGen = 0;
+// Monotonic id for spectrum selections — bumped on every selectSpectrum AND on
+// every load, so out-of-order / cross-file spectrum responses are discarded
+// (Codex r4-#3). Never reset, so a stale id can never collide with a live one.
+let currentSelectId = 0;
 // ADD-01: archive_paths with an in-flight getOpticalImage, to dedupe duplicate
 // requests (StrictMode / effect re-runs) before the first response arrives.
 const opticalInFlight = new Set<string>();
@@ -258,6 +262,7 @@ export const useStore = create<State & Actions>((set) => ({
   openUrl(url: string) {
     currentRequestId = Date.now();
     currentLoadGen++;
+    currentSelectId++;
     opticalInFlight.clear();
     // Reset file state but PRESERVE the user's global settings across loads.
     set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
@@ -269,6 +274,7 @@ export const useStore = create<State & Actions>((set) => ({
   async openFile(file: File) {
     currentRequestId = Date.now();
     currentLoadGen++;
+    currentSelectId++;
     opticalInFlight.clear();
     // Reset file state but PRESERVE the user's global settings across loads.
     set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
@@ -299,9 +305,11 @@ export const useStore = create<State & Actions>((set) => ({
 
   selectSpectrum(index: number) {
     // Optimistic UI update — actual spectrum data arrives via 'spectrumResult'.
-    // The Worker holds the active Reader; it performs the Parquet read.
+    // The Worker holds the active Reader; it performs the Parquet read. selectId
+    // lets the result handler drop superseded responses (Codex r4-#3).
+    const sid = ++currentSelectId;
     set({ selectedIndex: index });
-    worker.postMessage({ type: "selectSpectrum", index } satisfies WorkerRequest);
+    worker.postMessage({ type: "selectSpectrum", index, selectId: sid } satisfies WorkerRequest);
   },
 
   // Phase 4: render an m/z-windowed ion image (IMAGE-02).
@@ -501,6 +509,8 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       break;
 
     case "spectrumResult":
+      // Discard superseded / cross-file responses (Codex r4-#3).
+      if (msg.selectId !== currentSelectId) break;
       useStore.setState({
         selectedIndex: msg.spectrum.index,
         selectedSpectrum: msg.spectrum,

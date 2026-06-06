@@ -120,10 +120,15 @@ export function decodeTiff(bytes: Uint8Array): DecodedOptical {
   if (Number.isFinite(w0) && Number.isFinite(h0) && w0 * h0 > MAX_OPTICAL_PIXELS)
     throw new Error(`TIFF too large: ${w0}×${h0} px (cap ${MAX_OPTICAL_PIXELS})`);
   UTIF.decodeImage(ab, ifd);
-  const rgbaArr = UTIF.toRGBA8(ifd); // Uint8Array, RGBA row-major
+  // Re-validate the decoded dimensions BEFORE materializing RGBA — a malformed
+  // TIFF can hide/mutate its size past the pre-decode tag check (Codex r4-#6).
   const width = ifd.width;
   const height = ifd.height;
-  if (!width || !height) throw new Error("TIFF: zero dimensions");
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0)
+    throw new Error("TIFF: invalid decoded dimensions");
+  if (width * height > MAX_OPTICAL_PIXELS)
+    throw new Error(`TIFF too large: ${width}×${height} px (cap ${MAX_OPTICAL_PIXELS})`);
+  const rgbaArr = UTIF.toRGBA8(ifd); // Uint8Array, RGBA row-major
   return {
     width,
     height,
