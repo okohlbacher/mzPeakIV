@@ -564,6 +564,7 @@ async function initReaderAndGrid(): Promise<boolean> {
 async function computeIonImageFast(
   mzStart: number,
   mzEnd: number,
+  requestId?: number,
 ): Promise<Float32Array | null> {
   if (!activeZipStorage || !activeGrid) return null;
 
@@ -579,19 +580,24 @@ async function computeIonImageFast(
     const rawTable = await pf.read({ rowGroups: [rg] });
     const table = tableFromIPC(rawTable.intoIPCStream());
 
-    // Column-based extraction — far faster than row.get(r) for 1M-row tables.
     const v = pointVecs(table);
-    if (!v) continue; // skip malformed row groups
-    const { si: siVec, mz: mzVec, inten: intensVec } = v;
-
-    const nRows = table.numRows;
-    for (let r = 0; r < nRows; r++) {
-      const mz = Number(mzVec.get(r));
-      if (mz < mzStart || mz > mzEnd) continue;
-      const si = Number(siVec.get(r));
-      const inten = Number(intensVec.get(r));
-      intensitySum.set(si, (intensitySum.get(si) ?? 0) + inten);
+    if (v) {
+      // Vectorized: pull the whole row group's columns as typed arrays and index
+      // them directly. Per-element vec.get(r) over millions of points was the
+      // dominant render cost; toArray() indexing is ~orders of magnitude faster.
+      const mzArr = v.mz.toArray() as ArrayLike<number>;
+      const siArr = v.si.toArray() as ArrayLike<number | bigint>;
+      const inArr = v.inten.toArray() as ArrayLike<number>;
+      const nRows = table.numRows;
+      for (let r = 0; r < nRows; r++) {
+        const mz = mzArr[r] as number;
+        if (mz < mzStart || mz > mzEnd) continue;
+        const si = Number(siArr[r]);
+        intensitySum.set(si, (intensitySum.get(si) ?? 0) + (inArr[r] as number));
+      }
     }
+    if (requestId !== undefined)
+      send({ type: "renderProgress", requestId, done: rg + 1, total: nRG });
   }
 
   // coordToSpectrumIndex maps gridKey → spectrumIndex.
@@ -616,6 +622,7 @@ async function computeIonImageFast(
  */
 async function computeMultiIonImagesFast(
   windows: ({ start: number; end: number } | null)[],
+  requestId?: number,
 ): Promise<(Float32Array | null)[]> {
   const nullResult = () => windows.map(() => null);
   if (!activeZipStorage || !activeGrid) return nullResult();
@@ -631,25 +638,30 @@ async function computeMultiIonImagesFast(
     const rawTable = await pf.read({ rowGroups: [rg] });
     const table = tableFromIPC(rawTable.intoIPCStream());
     const v = pointVecs(table);
-    if (!v) continue;
-    const { si: siVec, mz: mzVec, inten: intensVec } = v;
-
-    const nRows = table.numRows;
-    for (let r = 0; r < nRows; r++) {
-      const mz = Number(mzVec.get(r));
-      let si = -1;
-      let inten = 0;
-      for (let c = 0; c < windows.length; c++) {
-        const w = windows[c];
-        if (!w || mz < w.start || mz > w.end) continue;
-        if (si < 0) {
-          si = Number(siVec.get(r)); // resolve once, only if a window matched
-          inten = Number(intensVec.get(r));
+    if (v) {
+      // Vectorized typed-array access (see computeIonImageFast).
+      const mzArr = v.mz.toArray() as ArrayLike<number>;
+      const siArr = v.si.toArray() as ArrayLike<number | bigint>;
+      const inArr = v.inten.toArray() as ArrayLike<number>;
+      const nRows = table.numRows;
+      for (let r = 0; r < nRows; r++) {
+        const mz = mzArr[r] as number;
+        let si = -1;
+        let inten = 0;
+        for (let c = 0; c < windows.length; c++) {
+          const w = windows[c];
+          if (!w || mz < w.start || mz > w.end) continue;
+          if (si < 0) {
+            si = Number(siArr[r]); // resolve once, only if a window matched
+            inten = inArr[r] as number;
+          }
+          const m = sums[c]!;
+          m.set(si, (m.get(si) ?? 0) + inten);
         }
-        const m = sums[c]!;
-        m.set(si, (m.get(si) ?? 0) + inten);
       }
     }
+    if (requestId !== undefined)
+      send({ type: "renderProgress", requestId, done: rg + 1, total: nRG });
   }
 
   const grid = activeGrid;
@@ -1070,7 +1082,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         }
 
         if (activeGrid && !activeReader) {
-          const ionImage = await computeIonImageFast(mzStart, mzEnd);
+          const ionImage = await computeIonImageFast(mzStart, mzEnd, requestId);
           const ionImageStats = ionImage ? computeIonImageStats(ionImage, activeGrid) : null;
           const transferList: Transferable[] = [];
           if (ionImage) transferList.push(ionImage.buffer);
@@ -1130,7 +1142,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         const windows = channels.map((ch) =>
           ch ? { start: ch.mz - ch.tolDa, end: ch.mz + ch.tolDa } : null,
         );
-        const results = await computeMultiIonImagesFast(windows);
+        const results = await computeMultiIonImagesFast(windows, requestId);
         const transferList: Transferable[] = results.flatMap((r) =>
           r ? [r.buffer] : [],
         );

@@ -54,6 +54,9 @@ type State = {
   percentile: number;
   /** Phase 5: true while a Worker renderIonImage request is in flight (D-02/D-03). */
   isRendering: boolean;
+  /** Row-group progress while an ion / multi-channel render streams data; null when
+   *  idle. Surfaced as a determinate "Rendering… N%" bar for slow remote files. */
+  renderProgress: { done: number; total: number } | null;
   /** BL-01: TIC normalization — divide each pixel's intensity by its TIC value. */
   ticNorm: boolean;
   /** BL-04: Gaussian smooth sigma in pixels (0 = disabled). */
@@ -195,6 +198,7 @@ const initialState: State = {
   percentile: persisted.percentile,
   // Phase 5 default.
   isRendering: false,
+  renderProgress: null,
   // BL defaults (persisted).
   ticNorm: persisted.ticNorm,
   smoothSigma: persisted.smoothSigma,
@@ -336,7 +340,7 @@ export const useStore = create<State & Actions>((set) => ({
     // Store the pending mzWindow — only apply it to state when ionImage is confirmed non-null.
     // Setting mzWindow early causes amber band to appear when ion image comes back null.
     currentMzWindow = { mz, tolDa };
-    set({ isRendering: true });
+    set({ isRendering: true, renderProgress: null });
     worker.postMessage(
       { type: "renderIonImage", mz, tolDa, requestId: rid } satisfies WorkerRequest,
     );
@@ -381,7 +385,7 @@ export const useStore = create<State & Actions>((set) => ({
     if (validChannels.length === 0) return;
     currentMcChannels = channels;
     const rid = ++currentRequestId;
-    set({ isRendering: true });
+    set({ isRendering: true, renderProgress: null });
     // Send the FULL (position-aligned) array — the worker returns one image per
     // position (null for disabled channels) so R/G/B compositing stays aligned.
     worker.postMessage(
@@ -503,6 +507,12 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       break;
     }
 
+    case "renderProgress":
+      // Determinate progress for a slow ion/multi render; ignore stale (Pattern 5).
+      if (msg.requestId !== currentRequestId) break;
+      useStore.setState({ renderProgress: { done: msg.done, total: msg.total } });
+      break;
+
     case "renderResult":
       // Stale response guard (Pattern 5 / T-05-05).
       if (msg.requestId !== currentRequestId) break;
@@ -510,6 +520,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         ionImage: msg.ionImage ?? null,
         ionImageStats: msg.stats ?? null,
         isRendering: false,
+        renderProgress: null,
         // Only apply mzWindow when there's a real ion image — prevents the amber
         // band from showing on the spectrum when the image came back null (Codex #7).
         mzWindow: msg.ionImage ? currentMzWindow : null,
@@ -534,6 +545,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
           images: msg.channels,
         },
         isRendering: false,
+        renderProgress: null,
       });
       break;
 
@@ -577,6 +589,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
           findings: msg.findings,
         },
         isRendering: false,
+        renderProgress: null,
       });
       break;
   }

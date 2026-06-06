@@ -154,6 +154,7 @@ export function ImagingPanel({
   const renderIonImage = useStore((s) => s.renderIonImage);
   const setColormapSettings = useStore((s) => s.setColormapSettings);
   const isRendering = useStore((s) => s.isRendering);
+  const renderProgress = useStore((s) => s.renderProgress);
 
   const stats = useStore((s) => s.stats);
   const fileMeta = useStore((s) => s.fileMeta);
@@ -1106,6 +1107,29 @@ export function ImagingPanel({
               No layers to blend yet — load an overview and render an ion image.
             </div>
           ))}
+
+        {/* Render progress — determinate bar while an ion/multi render streams row
+            groups (reassures during slow remote reads instead of a frozen button). */}
+        {isRendering && (
+          <div className="stage__render" role="status" aria-live="polite" data-testid="render-progress">
+            <span className="stage__render-label">
+              Rendering…
+              {renderProgress
+                ? ` ${Math.round((100 * renderProgress.done) / Math.max(1, renderProgress.total))}%`
+                : ""}
+            </span>
+            <div className="stage__render-track">
+              <div
+                className={`stage__render-bar${renderProgress ? "" : " stage__render-bar--indeterminate"}`}
+                style={
+                  renderProgress
+                    ? { width: `${(100 * renderProgress.done) / Math.max(1, renderProgress.total)}%` }
+                    : undefined
+                }
+              />
+            </div>
+          </div>
+        )}
 
         {/* Floating legend (tic / ion — not multi) */}
         {showLegend && (

@@ -87,6 +87,10 @@ export type WorkerResponse =
       stats: IonImageStats | null;
       requestId: number;
     }
+  // Incremental progress while a (potentially slow, network-bound) ion / multi-
+  // channel render streams row groups. requestId echoes the originating render so
+  // stale progress is ignored.
+  | { type: "renderProgress"; requestId: number; done: number; total: number }
   | { type: "spectrumResult"; spectrum: SpectrumArrays; selectId: number }
   | { type: "multiChannelResult"; channels: (Float32Array | null)[]; requestId: number }
   | { type: "meanSpectrumResult"; spectrum: SpectrumArrays }
