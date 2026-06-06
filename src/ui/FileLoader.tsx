@@ -1,13 +1,21 @@
 import { useState, useRef } from "react";
 import { useStore } from "../state/store";
 
-// Default demo URL — a real imaging dataset (PXD001283 HR2MSI mouse urinary
-// bladder, 260×134 px) on object storage. The browser streams it via HTTP Range
-// requests, so the bucket must serve the object with public read, byte-range
-// support, and CORS allowing this origin (GET + Range; expose Content-Range /
-// Accept-Ranges). Nothing is uploaded — the file is fetched into the browser.
-const DEFAULT_DEMO_URL =
-  "https://object.storage.eu01.onstackit.cloud/v09/demo/PXD001283-HR2MSI-urinary-bladder_HR2MSImouseurinarybladderS096.mzpeak";
+// Default demo URL — a small file bundled SAME-ORIGIN under the app's own base
+// path (mirrors how the upstream mzpeakts demo loads `static/small.mzpeak`).
+// Same-origin requests never hit CORS, so this loads instantly and offline. The
+// BASE_URL prefix keeps it correct under the GitHub-Pages project sub-path.
+const DEFAULT_DEMO_URL = `${import.meta.env.BASE_URL}static/small.mzpeak`;
+
+// Optional remote example: the full PXD001283 HR2MSI imaging dataset on object
+// storage. The browser streams it via HTTP Range, so the bucket must serve it
+// with public read, byte-range support, and CORS allowing this origin
+// (GET + Range; expose Content-Range / Accept-Ranges) — see BL-CORS. Until then
+// this example surfaces a clear network/CORS error rather than loading.
+const REMOTE_EXAMPLE = {
+  label: "HR2MSI imaging example",
+  url: "https://object.storage.eu01.onstackit.cloud/v09/demo/PXD001283-HR2MSI-urinary-bladder_HR2MSImouseurinarybladderS096.mzpeak",
+};
 
 interface Props {
   /** Whether a load is already in progress (disables inputs). */
@@ -133,6 +141,23 @@ export function FileLoader({ loading }: Props) {
           {loading ? "Loading…" : "Load URL"}
         </button>
       </form>
+
+      {/* Optional remote example dataset — one-click load (needs the bucket's CORS). */}
+      <div className="loader__demos">
+        <button
+          type="button"
+          className="chip"
+          data-testid="example-remote"
+          disabled={loading}
+          title={REMOTE_EXAMPLE.url}
+          onClick={() => {
+            setUrl(REMOTE_EXAMPLE.url);
+            if (!loading) void openUrl(REMOTE_EXAMPLE.url);
+          }}
+        >
+          {REMOTE_EXAMPLE.label}
+        </button>
+      </div>
     </div>
   );
 }

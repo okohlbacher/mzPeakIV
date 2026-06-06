@@ -61,8 +61,11 @@ Range requests) — a download *from* the source you choose, not an upload of yo
 
 ### Use it
 Open **https://okohlbacher.github.io/mzPeakIV/**, then either drop a `.mzpeak` file,
-browse for one, or paste a URL. The default URL points at a public demo dataset
-(PXD001283 — HR2MSI mouse urinary bladder, 260 × 134 px).
+browse for one, or paste a URL. A small example is bundled same-origin and loads
+instantly (the pre-filled default); the full **PXD001283 HR2MSI** imaging dataset
+(mouse urinary bladder, 260 × 134 px) is offered as a one-click **remote example**
+— it streams from object storage and therefore needs that host's CORS configured
+(see [Hosting the demo dataset](#hosting-the-demo-dataset)).
 
 ### Run locally
 ```bash

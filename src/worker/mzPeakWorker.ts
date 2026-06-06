@@ -111,10 +111,16 @@ function postError(err: unknown): void {
       findings: err.findings,
     });
   } else {
+    const message = err instanceof Error ? err.message : String(err);
+    // A failed cross-origin/Range fetch surfaces as a TypeError "Failed to fetch"
+    // (Chrome) / "NetworkError"/"Load failed" (Firefox/Safari) — it's a network or
+    // CORS problem, NOT a corrupt file. Classify it so the UI can guide the user.
+    const isNetwork =
+      err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(message);
     send({
       type: "error",
-      class: "corrupt",
-      message: err instanceof Error ? err.message : String(err),
+      class: isNetwork ? "network" : "corrupt",
+      message,
     });
   }
 }

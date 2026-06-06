@@ -6,11 +6,13 @@
 // Class hierarchy:
 //   Error
 //     ├── UnsupportedEncodingError  (DATA-02: unsupported but valid mzPeak file)
-//     └── CorruptFileError          (unreadable / not a valid mzPeak file)
+//     ├── CorruptFileError          (unreadable / not a valid mzPeak file)
+//     └── (network)                 (URL unreachable / CORS-blocked — classified
+//                                    from the fetch TypeError, no dedicated class)
 import type { UnsupportedFinding } from "./types";
 
 /** Discriminator string for store.error classification (R-03b). */
-export type ReaderErrorClass = "unsupported-encoding" | "corrupt";
+export type ReaderErrorClass = "unsupported-encoding" | "corrupt" | "network";
 
 /**
  * Thrown when a file uses an encoding the bundled mzpeakts reader cannot
