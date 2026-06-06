@@ -31,6 +31,10 @@ export type FileStats = {
   numEntities: number;
   mzRange: [number, number] | null;
   msLevels: number[];
+  /** Spectrum count per MS level, e.g. {1: 34840, 2: 1200}. Optional — only the
+   *  full reader path populates it; derive a single-level fallback from
+   *  numSpectra+msLevels when absent. */
+  spectraPerLevel?: Record<number, number>;
   /** Profile vs centroid breakdown (R-02b). Populated by computeStats. */
   representationCounts: { profile: number; centroid: number };
 };

@@ -194,6 +194,12 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
   const mySeq = ++loadSeq; // capture this load's generation for async self-guards
   const manifest = manifestFromStore(store);
   const isImaging = store.fileIndex.metadata?.imaging?.is_imaging === true;
+  // Total .mzpeak size — the zip Reader knows it (URL: HEAD/Content-Range; local:
+  // blob size). Surfaced in the File overview.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fileSize = (typeof (store.reader as any)?.size === "number"
+    ? (store.reader as any).size
+    : null) as number | null;
 
   // Minimal capabilities from the manifest — layout/encodings unknown until
   // full reader init, which is deferred to the first renderIonImage call.
@@ -216,7 +222,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
     // image" trigger, so the inspection panels would otherwise stay empty — the
     // user just wants to browse metadata + spectra right away. The store's
     // noImaging handler MERGES, so this second message fills in the details.
-    send({ type: "noImaging", result: { manifest, fileMeta: null, stats: null, capabilities } });
+    send({ type: "noImaging", result: { manifest, fileMeta: null, stats: null, capabilities, fileSize } });
     void (async () => {
       if (!activeZipStorage) return;
       try {
@@ -235,6 +241,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
             fileMeta,
             stats,
             capabilities: { ...fullCaps, isImaging: false },
+            fileSize,
           },
         });
       } catch (e) {
@@ -261,6 +268,7 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
       tic: null,
       mixedRepresentationWarning: null,
       opticalImages,
+      fileSize,
     },
   });
 
@@ -458,6 +466,7 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       numSpectra: nRows, numEntities: nRows,
       mzRange: Number.isFinite(globalMinMz) ? [globalMinMz, globalMaxMz] : null,
       msLevels: [1],
+      spectraPerLevel: { 1: nRows }, // imaging fast path is MS1-per-pixel
       representationCounts: { profile: 0, centroid: nRows },
     };
 

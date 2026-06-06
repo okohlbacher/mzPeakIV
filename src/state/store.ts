@@ -39,6 +39,8 @@ type State = {
   grid: ImagingGrid | null;
   /** TIC raster (length width*height) for the imaging grid; null when non-imaging or uncomputable (D-02). */
   tic: Float32Array | null;
+  /** Total .mzpeak size in bytes (zip reader size); null until known. */
+  fileSize: number | null;
   /** D-08 named warning: set only when a file mixes profile + centroid spectra. */
   mixedRepresentationWarning: string | null;
   stage: LoadStage;
@@ -183,6 +185,7 @@ const initialState: State = {
   capabilities: null,
   grid: null,
   tic: null,
+  fileSize: null,
   mixedRepresentationWarning: null,
   stage: "idle",
   error: null,
@@ -473,6 +476,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         capabilities: r.capabilities ?? prev.capabilities,
         grid: r.grid ?? prev.grid,
         tic: r.tic ?? prev.tic,
+        fileSize: r.fileSize ?? prev.fileSize,
         mixedRepresentationWarning:
           r.mixedRepresentationWarning ?? prev.mixedRepresentationWarning,
         opticalImages,
@@ -497,6 +501,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         fileMeta: r.fileMeta ?? prevNI.fileMeta,
         stats: r.stats ?? prevNI.stats,
         capabilities: r.capabilities ?? prevNI.capabilities,
+        fileSize: r.fileSize ?? prevNI.fileSize,
         grid: null,
         tic: null,
         stage: "no-imaging",

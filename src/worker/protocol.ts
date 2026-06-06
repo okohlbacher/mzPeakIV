@@ -137,6 +137,8 @@ export type LoadResult = {
   grid: ImagingGrid | null;
   tic: Float32Array | null;
   mixedRepresentationWarning: string | null;
+  /** Total archive size in bytes (zip reader size) — for the File overview. */
+  fileSize?: number | null;
   /**
    * ADD-01 / imaging-spec v0.5: descriptive metadata for embedded optical images
    * (TIFF ZIP members), parsed from `metadata.imaging.images[]`. The pixel data
@@ -157,6 +159,7 @@ export type NonImagingResult = {
   fileMeta: FileMeta | null;
   stats: FileStats | null;
   capabilities: Capabilities;
+  fileSize?: number | null;
 };
 
 /** State for a multi-channel overlay (BL-02). */

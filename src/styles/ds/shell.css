@@ -250,6 +250,11 @@
 }
 .loader__note svg { flex-shrink: 0; margin-top: 1px; color: var(--success); }
 .loader__note strong { color: var(--text-muted); font-weight: 600; }
+.loader__download {
+  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);
+  text-decoration: none; border-bottom: 1px dotted var(--border-strong);
+}
+.loader__download:hover { color: var(--accent); border-color: var(--accent); }
 .drop {
   width: 100%; border: var(--border-dashed) dashed var(--border-strong); border-radius: var(--radius-md);
   background: var(--gray-25); padding: var(--space-8) var(--space-6); cursor: pointer;

@@ -6,6 +6,7 @@ import { STAGE_LABEL } from "./stageLabels";
 import { FileLoader } from "./FileLoader";
 import { ProgressBar } from "./ProgressBar";
 import { ErrorBanner } from "./ErrorBanner";
+import { OverviewPanel } from "./OverviewPanel";
 import { SampleRunPanel } from "./SampleRunPanel";
 import { StatsPanel } from "./StatsPanel";
 import { OpticalPanel } from "./OpticalPanel";
@@ -134,8 +135,9 @@ export function App() {
                   ready
                 </Badge>
               </div>
+              <OverviewPanel />
               <SampleRunPanel />
-              <StatsPanel defaultOpen />
+              <StatsPanel />
               <OpticalPanel />
               <SettingsView />
               <FormatDetailsPanel />

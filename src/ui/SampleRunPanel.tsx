@@ -51,7 +51,7 @@ function polarityOf(...lists: AnyParam[][]): string | null {
   return null;
 }
 
-export function SampleRunPanel() {
+export function SampleRunPanel({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const fileMeta = useStore((s) => s.fileMeta);
   const stats = useStore((s) => s.stats);
   if (!fileMeta) return null;
@@ -139,7 +139,7 @@ export function SampleRunPanel() {
   const present = rows.filter(([, v]) => v != null);
 
   return (
-    <Panel title="Sample & Run" testid="sample-run-panel" defaultOpen>
+    <Panel title="Sample & Run" testid="sample-run-panel" defaultOpen={defaultOpen}>
       <div data-testid="sample-run-table">
         {present.length > 0 ? (
           present.map(([label, value]) => (

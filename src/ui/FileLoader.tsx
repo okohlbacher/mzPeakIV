@@ -36,7 +36,9 @@ export function FileLoader({ loading }: Props) {
   const openFile = useStore((s) => s.openFile);
   const openUrl = useStore((s) => s.openUrl);
 
-  const [url, setUrl] = useState(DEFAULT_DEMO_URL);
+  // Start empty (paste your own URL); the demos load via the chips below. A
+  // pre-filled long URL just rendered as a confusing truncated path in the box.
+  const [url, setUrl] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -142,8 +144,18 @@ export function FileLoader({ loading }: Props) {
         </button>
       </form>
 
-      {/* Optional remote example dataset — one-click load (needs the bucket's CORS). */}
+      {/* One-click example datasets. */}
       <div className="loader__demos">
+        <button
+          type="button"
+          className="chip"
+          data-testid="example-small"
+          disabled={loading}
+          title="Small bundled demo (non-imaging, loads instantly)"
+          onClick={() => !loading && void openUrl(DEFAULT_DEMO_URL)}
+        >
+          Small demo
+        </button>
         <button
           type="button"
           className="chip"
@@ -158,6 +170,17 @@ export function FileLoader({ loading }: Props) {
           {REMOTE_EXAMPLE.label}
         </button>
       </div>
+
+      {/* The imaging example streams a ~294 MB file over the network; downloading
+          it once and opening it locally renders ion images far faster. */}
+      <a
+        className="loader__download"
+        data-testid="download-demo"
+        href={REMOTE_EXAMPLE.url}
+        download
+      >
+        ↓ Download demo data for faster access
+      </a>
     </div>
   );
 }

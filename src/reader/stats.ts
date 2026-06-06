@@ -70,6 +70,7 @@ export function computeStats(
   const n = sm?.length ?? 0;
 
   const msLevelsSet = new Set<number>();
+  const perLevel: Record<number, number> = {};
   let mzMin: number | null = null;
   let mzMax: number | null = null;
   let profileCount = 0;
@@ -91,7 +92,10 @@ export function computeStats(
         : rec.msLevel != null
           ? Number(rec.msLevel)
           : null;
-    if (msLevel !== null && !isNaN(msLevel)) msLevelsSet.add(msLevel);
+    if (msLevel !== null && !isNaN(msLevel)) {
+      msLevelsSet.add(msLevel);
+      perLevel[msLevel] = (perLevel[msLevel] ?? 0) + 1;
+    }
 
     // Representation (R-02b)
     const reprRaw =
@@ -128,6 +132,7 @@ export function computeStats(
     numEntities: manifest.length,
     mzRange: mzMin !== null && mzMax !== null ? [mzMin, mzMax] : null,
     msLevels: Array.from(msLevelsSet).sort((a, b) => a - b),
+    spectraPerLevel: perLevel,
     representationCounts: { profile: profileCount, centroid: centroidCount },
   };
 }
