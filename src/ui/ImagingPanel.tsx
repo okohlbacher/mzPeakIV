@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Grid, Image, Layers, Download, Blend, Microscope } from "lucide-react";
+import { Grid, Image, Layers, Download, Blend, Microscope, Zap } from "lucide-react";
 
 import { useStore } from "../state/store";
 import {
@@ -155,6 +155,8 @@ export function ImagingPanel({
   const setColormapSettings = useStore((s) => s.setColormapSettings);
   const isRendering = useStore((s) => s.isRendering);
   const renderProgress = useStore((s) => s.renderProgress);
+  const ionIndexReady = useStore((s) => s.ionIndexReady);
+  const ionIndexPoints = useStore((s) => s.ionIndexPoints);
 
   const stats = useStore((s) => s.stats);
   const fileMeta = useStore((s) => s.fileMeta);
@@ -888,6 +890,27 @@ export function ImagingPanel({
           </div>
         )}
 
+        {/* In-memory index indicator: after the one-time full read, every ion
+            image renders instantly + exactly with no re-read. */}
+        {ionIndexReady && (view === "ion" || view === "multi") && (
+          <span
+            className="toolbar__hint"
+            data-testid="ion-index-badge"
+            title={`${
+              ionIndexPoints ? `${(ionIndexPoints / 1e6).toFixed(1)}M points ` : ""
+            }indexed in memory — every ion image now renders instantly and exactly, with no re-read.`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              fontSize: "var(--text-xs)",
+              color: "var(--text-muted)",
+            }}
+          >
+            <Zap size={12} aria-hidden="true" /> indexed
+          </span>
+        )}
+
         {view === "blend" && (
           <div className="toolbar__group" style={{ gap: "var(--space-5)" }}>
             {([
@@ -1113,7 +1136,9 @@ export function ImagingPanel({
         {isRendering && (
           <div className="stage__render" role="status" aria-live="polite" data-testid="render-progress">
             <span className="stage__render-label">
-              Rendering…
+              {/* The first render reads the whole file once to build the in-memory
+                  index; later renders are instant, so this is "Building index…". */}
+              {ionIndexReady ? "Rendering…" : "Building index…"}
               {renderProgress
                 ? ` ${Math.round((100 * renderProgress.done) / Math.max(1, renderProgress.total))}%`
                 : ""}

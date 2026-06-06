@@ -91,6 +91,9 @@ export type WorkerResponse =
   // channel render streams row groups. requestId echoes the originating render so
   // stale progress is ignored.
   | { type: "renderProgress"; requestId: number; done: number; total: number }
+  // Posted once the in-memory ion-image index finishes building (after the first
+  // full data pass). Tells the UI that subsequent ion images are instant + exact.
+  | { type: "ionIndexReady"; points: number }
   | { type: "spectrumResult"; spectrum: SpectrumArrays; selectId: number }
   | { type: "multiChannelResult"; channels: (Float32Array | null)[]; requestId: number }
   | { type: "meanSpectrumResult"; spectrum: SpectrumArrays }

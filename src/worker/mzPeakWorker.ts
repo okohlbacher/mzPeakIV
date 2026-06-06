@@ -72,6 +72,29 @@ let activeZipStorage: ZipStorage<any> | null = null;
 // the object-storage endpoint throttles per-connection, so independent
 // connections scale aggregate throughput.
 let activeSourceUrl: string | null = null;
+
+/**
+ * In-memory EXACT ion-image index, built once on the first ion-image request by
+ * a single full pass over spectra_data. Every point that maps onto the grid is
+ * flattened into three parallel typed arrays (m/z, pixel, intensity). Subsequent
+ * ion images — for ANY m/z window — are an in-memory scan: no network, no Parquet
+ * decode, exact (no binning). The read of the data file (the slow, network-bound
+ * step) happens exactly once per load instead of once per render.
+ */
+let activeIonCache: {
+  mz: Float32Array;
+  pix: Uint16Array | Int32Array;
+  inten: Float32Array;
+} | null = null;
+/** Set when the dataset exceeds the cache budget — fall back to per-render streaming. */
+let ionCacheTooBig = false;
+/**
+ * Memory budget for the in-memory ion-image index. Per point we store m/z (f32, 4 B)
+ * + pixel (u16 when the grid ≤ 65 535 cells, else i32) + intensity (f32, 4 B) ≈ 10 B.
+ * Datasets whose point count exceeds this budget stream per render instead
+ * (correctness identical, just not cached).
+ */
+const MAX_CACHE_BYTES = 900_000_000; // ~900 MB → ~90M points at 10 B/point
 // Bumped on every runFastLoad. Async background work (the deferred buildGridFast
 // loadResult) captures the value at start and refuses to post once superseded by
 // a newer load, so a slow background grid can't bleed into a freshly opened file
@@ -649,6 +672,129 @@ async function forEachSpectraRowGroup(
   return true;
 }
 
+/**
+ * Build the in-memory ion-image index with ONE full pass over spectra_data.
+ * Returns true if the index is ready (already built, or built now); false if the
+ * dataset is too large to cache (caller should stream per render instead).
+ *
+ * The point→pixel map is precomputed by inverting the grid's coord→spectrum_index
+ * map; points whose spectrum isn't on the grid are skipped. Sizing is read from
+ * Parquet metadata FIRST (cheap, no data read) so over-budget files never trigger
+ * a wasted streaming pass here.
+ */
+async function tryBuildIonCache(requestId?: number): Promise<boolean> {
+  if (activeIonCache) return true;
+  if (ionCacheTooBig || !activeGrid) return false;
+
+  const probe = await openIndependentSpectraParquet();
+  if (!probe) return false;
+  const meta = probe.metadata();
+  let nPoints = 0;
+  const nRG = meta.numRowGroups();
+  for (let rg = 0; rg < nRG; rg++) nPoints += meta.rowGroup(rg).numRows();
+
+  // Pixel index fits in u16 when the grid has ≤ 65 535 cells (the usual case);
+  // otherwise fall back to i32. Per-point bytes = 4 (m/z) + (2|4) (pixel) + 4 (int).
+  const nPix = activeGrid.width * activeGrid.height;
+  const useU16 = nPix <= 0xffff;
+  const bytesPerPoint = 4 + (useU16 ? 2 : 4) + 4;
+  if (nPoints * bytesPerPoint > MAX_CACHE_BYTES) {
+    ionCacheTooBig = true;
+    return false;
+  }
+
+  // Invert grid: spectrum_index -> pixel (grid key).
+  const siToPix = new Map<number, number>();
+  for (const [gridKey, si] of activeGrid.coordToSpectrumIndex) siToPix.set(si, gridKey);
+
+  const mzChunks: Float32Array[] = [];
+  const pixChunks: (Uint16Array | Int32Array)[] = [];
+  const inChunks: Float32Array[] = [];
+  let total = 0;
+
+  const ok = await forEachSpectraRowGroup((table) => {
+    const v = pointVecs(table);
+    if (!v) return;
+    const mzArr = v.mz.toArray() as ArrayLike<number>;
+    const siArr = v.si.toArray() as ArrayLike<number | bigint>;
+    const inArr = v.inten.toArray() as ArrayLike<number>;
+    const n = mzArr.length;
+    const mzC = new Float32Array(n);
+    const pixC = useU16 ? new Uint16Array(n) : new Int32Array(n);
+    const inC = new Float32Array(n);
+    let k = 0;
+    for (let r = 0; r < n; r++) {
+      const pix = siToPix.get(Number(siArr[r]));
+      if (pix === undefined) continue; // point's spectrum is off-grid
+      mzC[k] = mzArr[r] as number;
+      pixC[k] = pix;
+      inC[k] = inArr[r] as number;
+      k++;
+    }
+    if (k > 0) {
+      // slice (copy to exact size) so the full-length buffers are freed.
+      mzChunks.push(mzC.slice(0, k));
+      pixChunks.push(pixC.slice(0, k));
+      inChunks.push(inC.slice(0, k));
+      total += k;
+    }
+  }, requestId);
+  if (!ok) return false;
+
+  // Concatenate the per-row-group chunks into the flat index arrays.
+  const mz = new Float32Array(total);
+  const pix = useU16 ? new Uint16Array(total) : new Int32Array(total);
+  const inten = new Float32Array(total);
+  let off = 0;
+  for (let i = 0; i < mzChunks.length; i++) {
+    const len = mzChunks[i].length;
+    mz.set(mzChunks[i], off);
+    pix.set(pixChunks[i], off);
+    inten.set(inChunks[i], off);
+    off += len;
+    // Release each source chunk as it's consumed so peak memory stays near the
+    // final index size (one extra chunk) rather than ~2× it.
+    mzChunks[i] = undefined as unknown as Float32Array;
+    pixChunks[i] = undefined as unknown as Uint16Array;
+    inChunks[i] = undefined as unknown as Float32Array;
+  }
+  activeIonCache = { mz, pix, inten };
+  send({ type: "ionIndexReady", points: total });
+  return true;
+}
+
+/** Exact ion image for one window, scanned from the in-memory index. */
+function ionImageFromCache(mzStart: number, mzEnd: number): Float32Array {
+  const { mz, pix, inten } = activeIonCache!;
+  const img = new Float32Array(activeGrid!.width * activeGrid!.height);
+  for (let i = 0; i < mz.length; i++) {
+    const m = mz[i];
+    if (m < mzStart || m > mzEnd) continue;
+    img[pix[i]] += inten[i];
+  }
+  return img;
+}
+
+/** Exact multi-channel ion images, single scan of the in-memory index. */
+function multiIonImagesFromCache(
+  windows: ({ start: number; end: number } | null)[],
+): (Float32Array | null)[] {
+  const { mz, pix, inten } = activeIonCache!;
+  const nPix = activeGrid!.width * activeGrid!.height;
+  const imgs = windows.map((w) => (w ? new Float32Array(nPix) : null));
+  for (let i = 0; i < mz.length; i++) {
+    const m = mz[i];
+    const p = pix[i];
+    const val = inten[i];
+    for (let c = 0; c < windows.length; c++) {
+      const w = windows[c];
+      if (!w || m < w.start || m > w.end) continue;
+      imgs[c]![p] += val;
+    }
+  }
+  return imgs;
+}
+
 async function computeIonImageFast(
   mzStart: number,
   mzEnd: number,
@@ -656,6 +802,11 @@ async function computeIonImageFast(
 ): Promise<Float32Array | null> {
   if (!activeZipStorage || !activeGrid) return null;
 
+  // Fast path: the in-memory index serves any window instantly + exactly. The
+  // first request builds it (one full pass); later requests are cache hits.
+  if (await tryBuildIonCache(requestId)) return ionImageFromCache(mzStart, mzEnd);
+
+  // Fallback (dataset too large to cache): stream per render as before.
   // Accumulate intensity sums per spectrum_index across all row groups.
   // Use a Map for sparse accumulation (most spectra may have 0 signal in range).
   const intensitySum = new Map<number, number>();
@@ -705,6 +856,10 @@ async function computeMultiIonImagesFast(
   const nullResult = () => windows.map(() => null);
   if (!activeZipStorage || !activeGrid) return nullResult();
 
+  // Fast path: serve every channel from the in-memory index (instant + exact).
+  if (await tryBuildIonCache(requestId)) return multiIonImagesFromCache(windows);
+
+  // Fallback (dataset too large to cache): single streamed pass, all channels.
   // One sparse accumulator per non-null window.
   const sums = windows.map((w) => (w ? new Map<number, number>() : null));
 
@@ -1082,6 +1237,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeReader = null;
         activeStats = null;
         activeGrid = null;
+        activeIonCache = null;
+        ionCacheTooBig = false;
 
         // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
         // No Parquet data read here. Full reader init is deferred to first
@@ -1108,6 +1265,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeReader = null;
         activeStats = null;
         activeGrid = null;
+        activeIonCache = null;
+        ionCacheTooBig = false;
         activeSourceUrl = null; // local/in-memory — independent connections N/A
 
         // File objects cannot cross the Worker boundary (Pitfall 3 / Pattern 4).

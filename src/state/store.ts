@@ -59,6 +59,11 @@ type State = {
   /** Row-group progress while an ion / multi-channel render streams data; null when
    *  idle. Surfaced as a determinate "Rendering… N%" bar for slow remote files. */
   renderProgress: { done: number; total: number } | null;
+  /** True once the worker's in-memory ion-image index is built — subsequent ion
+   *  images are instant + exact (no re-read). Reset on each load. */
+  ionIndexReady: boolean;
+  /** Number of points held in the in-memory ion-image index (null until built). */
+  ionIndexPoints: number | null;
   /** BL-01: TIC normalization — divide each pixel's intensity by its TIC value. */
   ticNorm: boolean;
   /** BL-04: Gaussian smooth sigma in pixels (0 = disabled). */
@@ -202,6 +207,8 @@ const initialState: State = {
   // Phase 5 default.
   isRendering: false,
   renderProgress: null,
+  ionIndexReady: false,
+  ionIndexPoints: null,
   // BL defaults (persisted).
   ticNorm: persisted.ticNorm,
   smoothSigma: persisted.smoothSigma,
@@ -511,6 +518,11 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       });
       break;
     }
+
+    case "ionIndexReady":
+      // The in-memory ion-image index is built — later renders are instant + exact.
+      useStore.setState({ ionIndexReady: true, ionIndexPoints: msg.points });
+      break;
 
     case "renderProgress":
       // Determinate progress for a slow ion/multi render; ignore stale (Pattern 5).
