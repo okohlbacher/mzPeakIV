@@ -17,11 +17,7 @@ import {
   type Colormap,
 } from "./rasterize";
 import { placeOpticalOnGrid } from "../imaging/optical";
-import {
-  encodeSingleChannelTiff,
-  encodeRgbTiff,
-  downloadTiff,
-} from "../export/tiff";
+import { encodeRgba8Tiff, downloadTiff } from "../export/tiff";
 import type { ImagingGrid } from "../imaging/types";
 import type { ChannelRequest } from "../worker/protocol";
 
@@ -175,6 +171,9 @@ export function ImagingPanel({
   const mcCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const blendCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const opticalCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Download Image: chosen export format (applies to every image tab).
+  const [dlFormat, setDlFormat] = useState<"png" | "tiff" | "jpeg">("png");
 
   // Blend view: per-layer opacity (0–1) for the TIC / ion / RGB / optical overlay.
   const [blendOpacity, setBlendOpacity] = useState<{
@@ -755,35 +754,73 @@ export function ImagingPanel({
     renderMultiChannel(channels);
   }
 
-  // BL-05: TIFF export helpers
-  function handleTiffExport() {
-    if (!grid) return;
-    const stem = filenameStem(fileMeta?.run);
-
-    // If on multi-channel view and multi-channel images exist, export RGB
-    if (view === "multi" && multiChannel?.images) {
-      const [r, g, b] = multiChannel.images;
-      if (r && g && b) {
-        const bytes = encodeRgbTiff(r, g, b, grid.width, grid.height);
-        downloadTiff(bytes, `${stem}_RGB.tif`);
-        return;
-      }
-    }
-
-    // Single-channel ion image export
-    if (ionImage) {
-      const mz = mzWindow?.mz;
-      const tol = mzWindow?.tolDa;
-      const mzLabel = mz != null && tol != null
-        ? `mz${mz.toFixed(4)}±${tol.toFixed(4)}Da`
-        : "ion-image";
-      const bytes = encodeSingleChannelTiff(ionImage, grid.width, grid.height);
-      downloadTiff(bytes, `${stem}_${mzLabel}.tif`);
+  // The canvas backing the currently-active image tab (used by Download Image).
+  function activeCanvas(): HTMLCanvasElement | null {
+    switch (view) {
+      case "overview":
+        return canvasRef.current;
+      case "optical":
+        return opticalCanvasRef.current;
+      case "ion":
+        return ionCanvasRef.current;
+      case "multi":
+        return mcCanvasRef.current;
+      case "blend":
+        return blendCanvasRef.current;
+      default:
+        return null;
     }
   }
 
+  // Download Image (every image tab) — exports the displayed raster as TIFF /
+  // PNG / JPEG. PNG/JPEG go through canvas.toBlob; TIFF encodes the canvas RGBA
+  // as an 8-bit RGB TIFF (browsers can't toBlob TIFF).
+  function handleDownloadImage() {
+    const canvas = activeCanvas();
+    if (!canvas || canvas.width === 0 || canvas.height === 0) return;
+    const stem = filenameStem(fileMeta?.run);
+    let suffix = view as string;
+    if (view === "ion" && mzWindow)
+      suffix = `mz${mzWindow.mz.toFixed(4)}±${mzWindow.tolDa.toFixed(4)}Da`;
+    const base = `${stem}_${suffix}`;
 
-  const canExportTiff = (ionImage !== null || (multiChannel?.images && multiChannel.images.some(Boolean))) && grid !== null;
+    if (dlFormat === "tiff") {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const { width, height } = canvas;
+      const rgba = ctx.getImageData(0, 0, width, height).data;
+      downloadTiff(encodeRgba8Tiff(rgba, width, height), `${base}.tif`);
+      return;
+    }
+    const mime = dlFormat === "png" ? "image/png" : "image/jpeg";
+    const ext = dlFormat === "png" ? "png" : "jpg";
+    canvas.toBlob(
+      (blob) => {
+        if (!blob || typeof document === "undefined") return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${base}.${ext}`;
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+      mime,
+      0.92,
+    );
+  }
+
+  // Download is available on any image tab that currently shows a raster.
+  const canDownloadImage =
+    (view === "overview" && tic !== null && grid !== null) ||
+    (view === "optical" && decodedOptical !== null) ||
+    (view === "ion" && ionImage !== null && grid !== null) ||
+    (view === "multi" && !!multiChannel?.images && grid !== null) ||
+    (view === "blend" &&
+      grid !== null &&
+      (tic !== null || ionImage !== null || !!multiChannel?.images || opticalPlaced !== null));
 
   // Colormap selector applies to the ion image AND the overview TIC (both go
   // through rasterizeImage/rasterizeTic, which honor the store colormap + scale).
@@ -953,20 +990,31 @@ export function ImagingPanel({
           />
         )}
 
-        {(view === "ion" || view === "multi") && (
-          <>
-            <div className="toolbar__sep" />
-            <Button
-              variant="secondary"
-              size="sm"
-              iconLeft={<Download size={14} />}
-              disabled={!canExportTiff}
-              onClick={handleTiffExport}
-            >
-              TIFF
-            </Button>
-          </>
-        )}
+        {/* Download Image — present on every image tab (TIFF / PNG / JPEG). */}
+        <div className="toolbar__sep" />
+        <div className="toolbar__group">
+          <Select
+            size="sm"
+            ariaLabel="download format"
+            value={dlFormat}
+            onChange={(v) => setDlFormat(v as "png" | "tiff" | "jpeg")}
+            options={[
+              { value: "png", label: "PNG" },
+              { value: "tiff", label: "TIFF" },
+              { value: "jpeg", label: "JPEG" },
+            ]}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            iconLeft={<Download size={14} />}
+            disabled={!canDownloadImage}
+            onClick={handleDownloadImage}
+            data-testid="download-image"
+          >
+            Download Image
+          </Button>
+        </div>
       </div>
 
       {/* ── Stage: the dark data canvas area ───────────────────────────────── */}

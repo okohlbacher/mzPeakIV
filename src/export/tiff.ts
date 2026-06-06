@@ -374,6 +374,32 @@ export function encodeRgbTiff(
 }
 
 /**
+ * Encode an RGBA byte raster (e.g. a canvas's ImageData) as an 8-bit RGB TIFF.
+ * The alpha channel is dropped. Used by the generic "Download Image → TIFF"
+ * export, which saves the displayed raster of any image tab.
+ *
+ * @param rgba   Interleaved RGBA bytes, length width*height*4 (row-major).
+ * @param width  Image width in pixels.
+ * @param height Image height in pixels.
+ */
+export function encodeRgba8Tiff(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+): Uint8Array {
+  const n = width * height;
+  const r = new Float32Array(n);
+  const g = new Float32Array(n);
+  const b = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    r[k] = rgba[k * 4] / 255;
+    g[k] = rgba[k * 4 + 1] / 255;
+    b[k] = rgba[k * 4 + 2] / 255;
+  }
+  return encodeRgbTiff(r, g, b, width, height);
+}
+
+/**
  * Trigger a browser download of a TIFF file.
  *
  * Creates a Blob with MIME type `image/tiff`, synthesises a temporary object
