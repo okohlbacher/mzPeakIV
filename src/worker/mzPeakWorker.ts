@@ -697,12 +697,31 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   for (let rg = 0; rg < nRG; rg++) nPoints += meta.rowGroup(rg).numRows();
 
   // Pixel index fits in u16 when the grid has ≤ 65 535 cells (the usual case);
-  // otherwise fall back to i32. Per-point bytes = 4 (m/z) + (2|4) (pixel) + 4 (int).
+  // otherwise fall back to i32. Per-point bytes = 8 (m/z f64) + (2|4) (pixel) + 4 (int).
   const nPix = activeGrid.width * activeGrid.height;
   const useU16 = nPix <= 0xffff;
   const bytesPerPoint = 8 + (useU16 ? 2 : 4) + 4;
-  if (nPoints * bytesPerPoint > MAX_CACHE_BYTES) {
+  // HARD SIZE LIMIT: never build an index larger than the budget. nPoints is the
+  // total row count (an upper bound on on-grid points), read cheaply from metadata
+  // so an over-budget file never allocates anything — it streams per render.
+  if (!Number.isFinite(nPoints) || nPoints <= 0 || nPoints * bytesPerPoint > MAX_CACHE_BYTES) {
     ionCacheTooBig = true;
+    return false;
+  }
+
+  // Pre-allocate the index arrays ONCE at the budget-bounded size and fill them
+  // directly with a running write offset (no per-row-group chunks, no concat) so
+  // peak memory equals the final index — not ~2× it. If even this allocation
+  // fails on a memory-constrained device, degrade gracefully to streaming.
+  let mzBuf: Float64Array;
+  let pixBuf: Uint16Array | Int32Array;
+  let inBuf: Float32Array;
+  try {
+    mzBuf = new Float64Array(nPoints);
+    pixBuf = useU16 ? new Uint16Array(nPoints) : new Int32Array(nPoints);
+    inBuf = new Float32Array(nPoints);
+  } catch {
+    ionCacheTooBig = true; // can't allocate the index — stream per render instead
     return false;
   }
 
@@ -710,11 +729,7 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   const siToPix = new Map<number, number>();
   for (const [gridKey, si] of activeGrid.coordToSpectrumIndex) siToPix.set(si, gridKey);
 
-  const mzChunks: Float64Array[] = [];
-  const pixChunks: (Uint16Array | Int32Array)[] = [];
-  const inChunks: Float32Array[] = [];
-  let total = 0;
-
+  let w = 0; // write cursor; w never exceeds nPoints (on-grid points ≤ total)
   const ok = await forEachSpectraRowGroup((table) => {
     const v = pointVecs(table);
     if (!v) return;
@@ -722,48 +737,27 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
     const siArr = v.si.toArray() as ArrayLike<number | bigint>;
     const inArr = v.inten.toArray() as ArrayLike<number>;
     const n = mzArr.length;
-    const mzC = new Float64Array(n);
-    const pixC = useU16 ? new Uint16Array(n) : new Int32Array(n);
-    const inC = new Float32Array(n);
-    let k = 0;
     for (let r = 0; r < n; r++) {
       const pix = siToPix.get(Number(siArr[r]));
       if (pix === undefined) continue; // point's spectrum is off-grid
-      mzC[k] = mzArr[r] as number;
-      pixC[k] = pix;
-      inC[k] = inArr[r] as number;
-      k++;
-    }
-    if (k > 0) {
-      // slice (copy to exact size) so the full-length buffers are freed.
-      mzChunks.push(mzC.slice(0, k));
-      pixChunks.push(pixC.slice(0, k));
-      inChunks.push(inC.slice(0, k));
-      total += k;
+      if (w >= nPoints) break; // hard guard: never write past the allocation
+      mzBuf[w] = mzArr[r] as number;
+      pixBuf[w] = pix;
+      inBuf[w] = inArr[r] as number;
+      w++;
     }
   }, requestId);
   if (!ok) return false;
 
-  // Concatenate the per-row-group chunks into the flat index arrays.
-  const mz = new Float64Array(total);
-  const pix = useU16 ? new Uint16Array(total) : new Int32Array(total);
-  const inten = new Float32Array(total);
-  let off = 0;
-  for (let i = 0; i < mzChunks.length; i++) {
-    const len = mzChunks[i].length;
-    mz.set(mzChunks[i], off);
-    pix.set(pixChunks[i], off);
-    inten.set(inChunks[i], off);
-    off += len;
-    // Release each source chunk as it's consumed so peak memory stays near the
-    // final index size (one extra chunk) rather than ~2× it.
-    mzChunks[i] = undefined as unknown as Float64Array;
-    pixChunks[i] = undefined as unknown as Uint16Array;
-    inChunks[i] = undefined as unknown as Float32Array;
-  }
-  activeIonCache = { mz, pix, inten };
+  // subarray() returns a view (no copy); on-grid points are usually ≈ all points,
+  // so the unused tail (if any) is negligible and still within budget.
+  activeIonCache = {
+    mz: mzBuf.subarray(0, w),
+    pix: pixBuf.subarray(0, w),
+    inten: inBuf.subarray(0, w),
+  };
   activeIonCacheSiToPix = siToPix; // enables instant per-pixel spectra
-  send({ type: "ionIndexReady", points: total });
+  send({ type: "ionIndexReady", points: w });
   return true;
 }
 
