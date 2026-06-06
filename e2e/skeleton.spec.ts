@@ -9,8 +9,9 @@ test("loads a real .mzpeak by URL, shows metadata + manifest, plots a spectrum",
 }) => {
   await page.goto("./");
 
-  // Loader zone: the URL defaults to the bundled demo; one click loads it.
-  await expect(page.getByTestId("url-input")).toHaveValue(/small\.mzpeak$/);
+  // Loader zone: the default demo URL now points at a remote imaging dataset, so
+  // load the committed offline fixture explicitly to keep this test fast + hermetic.
+  await page.getByTestId("url-input").fill("/mzPeakIV/static/small.mzpeak");
   await page.getByTestId("load-button").click();
 
   // Wait for the staged load to reach a non-error TERMINAL state. The bundled
