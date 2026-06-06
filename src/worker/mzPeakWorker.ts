@@ -67,6 +67,11 @@ function sendTransfer(message: WorkerResponse, transfer: Transferable[]): void {
 // ---------------------------------------------------------------------------
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let activeZipStorage: ZipStorage<any> | null = null;
+// Source URL for the current load (null for local/blob loads). Used to spin up
+// INDEPENDENT readers (own HTTP connection each) for parallel row-group reads —
+// the object-storage endpoint throttles per-connection, so independent
+// connections scale aggregate throughput.
+let activeSourceUrl: string | null = null;
 // Bumped on every runFastLoad. Async background work (the deferred buildGridFast
 // loadResult) captures the value at start and refuses to post once superseded by
 // a newer load, so a slow background grid can't bleed into a freshly opened file
@@ -162,6 +167,32 @@ async function openSpectraDataParquet(): Promise<ParquetFile | null> {
   const blob = await activeZipStorage.open((entry as any).name);
   if (!blob) return null;
   return ParquetFile.fromFile(blob as unknown as Blob);
+}
+
+/**
+ * Like openSpectraDataParquet, but for URL sources it builds a FRESH ZipStorage
+ * (its own HttpRangeReader = its own HTTP connection). The endpoint throttles
+ * per-connection (~0.65 MB/s) while aggregate scales with connections, so giving
+ * each parallel row-group reader an independent connection scales throughput.
+ * Local/blob sources reuse the shared in-memory reader (no connection to scale).
+ */
+async function openIndependentSpectraParquet(): Promise<ParquetFile | null> {
+  if (!activeSourceUrl) return openSpectraDataParquet(); // local: in-memory
+  try {
+    const store = new ZipStorage(new HttpRangeReader(activeSourceUrl));
+    await store.init();
+    const entry = store.fileIndex.files.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
+    );
+    if (!entry) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blob = await store.open((entry as any).name);
+    if (!blob) return null;
+    return ParquetFile.fromFile(blob as unknown as Blob);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -575,7 +606,7 @@ async function initReaderAndGrid(): Promise<boolean> {
  * Build-configurable via VITE_RG_CONCURRENCY for tuning/benchmarking; defaults to
  * 4 (the proven value — higher gave no live gain, see commit history).
  */
-const RG_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_RG_CONCURRENCY) || 4);
+const RG_CONCURRENCY = Math.max(1, Number(import.meta.env.VITE_RG_CONCURRENCY) || 8);
 
 /**
  * Stream every row group of spectra_data.parquet, invoking `onTable` for each.
@@ -594,12 +625,12 @@ async function forEachSpectraRowGroup(
   onTable: (table: any) => void,
   requestId?: number,
 ): Promise<boolean> {
-  const probe = await openSpectraDataParquet();
+  const probe = await openIndependentSpectraParquet();
   if (!probe) return false;
   const nRG = probe.metadata().numRowGroups();
   const conc = Math.max(1, Math.min(RG_CONCURRENCY, nRG));
   const extra = await Promise.all(
-    Array.from({ length: conc - 1 }, () => openSpectraDataParquet()),
+    Array.from({ length: conc - 1 }, () => openIndependentSpectraParquet()),
   );
   const handles = [probe, ...extra].filter((p): p is NonNullable<typeof probe> => !!p);
 
@@ -1066,6 +1097,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         const store = new ZipStorage(new HttpRangeReader(msg.url));
         await store.init();
         activeZipStorage = store;
+        activeSourceUrl = msg.url;
         await runFastLoad(activeZipStorage);
         break;
       }
@@ -1076,6 +1108,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeReader = null;
         activeStats = null;
         activeGrid = null;
+        activeSourceUrl = null; // local/in-memory — independent connections N/A
 
         // File objects cannot cross the Worker boundary (Pitfall 3 / Pattern 4).
         // The main thread transfers the ArrayBuffer; reconstruct a Blob here.
