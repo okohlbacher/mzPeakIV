@@ -10,7 +10,7 @@
 // DO NOT: import from ../state/store, instantiate `new Worker(...)` in this file.
 
 import { ZipStorage } from "mzpeakts";
-import { Uint8ArrayWriter } from "@zip.js/zip.js";
+import { Uint8ArrayWriter, HttpRangeReader } from "@zip.js/zip.js";
 import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
 import { buildMiniParquet, type ColChunk } from "./parquetMini";
@@ -1004,7 +1004,17 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
         // No Parquet data read here. Full reader init is deferred to first
         // renderIonImage / selectSpectrum call.
-        activeZipStorage = await ZipStorage.fromUrl(msg.url);
+        //
+        // NOTE: we deliberately do NOT use ZipStorage.fromUrl() — it attaches a
+        // bogus `Access-Control-Allow-Origin: *` REQUEST header (that's a response
+        // header; meaningless on a request). The browser then preflights with
+        // `Access-Control-Request-Headers: access-control-allow-origin, range`,
+        // which a correct CORS rule (allowing only Range) rejects → "Failed to
+        // fetch". Build the reader ourselves with no extra headers so a minimal,
+        // correct bucket CORS policy (GET + Range) is all that's needed.
+        const store = new ZipStorage(new HttpRangeReader(msg.url));
+        await store.init();
+        activeZipStorage = store;
         await runFastLoad(activeZipStorage);
         break;
       }
