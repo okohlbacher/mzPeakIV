@@ -65,7 +65,9 @@ browse for one, or paste a URL. A small example is bundled same-origin and loads
 instantly (the pre-filled default); the full **PXD001283 HR2MSI** imaging dataset
 (mouse urinary bladder, 260 × 134 px) is offered as a one-click **remote example**
 — it streams from object storage and therefore needs that host's CORS configured
-(see [Hosting the demo dataset](#hosting-the-demo-dataset)).
+(see [Hosting the demo dataset](#hosting-the-demo-dataset)). URLs may be `https://`
+or `s3://bucket/key` (an `s3://` address is rewritten to the storage HTTPS endpoint;
+anonymous public-read only — no in-browser credentials).
 
 ### Run locally
 ```bash

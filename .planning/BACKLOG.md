@@ -234,7 +234,12 @@ to reflect the chosen value.
 
 ## Infrastructure & loading
 
-### BL-S3 · Load datasets from `s3://` URLs
+### BL-S3 · Load datasets from `s3://` URLs — ✅ IMPLEMENTED
+
+**Status**: Done. `src/reader/resolveUrl.ts` rewrites `s3://bucket/key` → the
+configured HTTPS endpoint (default `object.storage.eu01.onstackit.cloud`,
+path-style) in `store.openUrl`; anonymous public-read only, no in-browser signing.
+Unit-tested in `resolveUrl.test.ts`. Still gated on the bucket's CORS (BL-CORS).
 
 **What**: Accept an `s3://bucket/key` URL in the loader and stream it via HTTP Range,
 the same way the current `https://…` path does.

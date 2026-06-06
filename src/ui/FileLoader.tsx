@@ -127,7 +127,7 @@ export function FileLoader({ loading }: Props) {
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://…/file.mzpeak"
+            placeholder="https://… or s3://bucket/key.mzpeak"
             disabled={loading}
             aria-label="mzpeak-url"
           />

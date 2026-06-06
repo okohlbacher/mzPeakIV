@@ -4,6 +4,7 @@ import { type Colormap } from "../ui/rasterize";
 import type { ImagingGrid } from "../imaging/types";
 import type { OpticalImageMeta, DecodedOptical } from "../imaging/optical";
 import type { ReaderErrorClass } from "../reader/errors";
+import { resolveLoadUrl } from "../reader/resolveUrl";
 import type {
   Capabilities,
   FileMeta,
@@ -264,6 +265,9 @@ export const useStore = create<State & Actions>((set) => ({
   ...initialState,
 
   openUrl(url: string) {
+    // Rewrite s3://bucket/key → the configured HTTPS endpoint (BL-S3); http(s)
+    // passes through. A browser can only fetch over http(s).
+    const resolved = resolveLoadUrl(url);
     currentRequestId = Date.now();
     currentLoadGen++;
     currentSelectId++;
@@ -271,7 +275,7 @@ export const useStore = create<State & Actions>((set) => ({
     // Reset file state but PRESERVE the user's global settings across loads.
     set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
     postLoadWhenReady(() =>
-      worker.postMessage({ type: "loadUrl", url } satisfies WorkerRequest),
+      worker.postMessage({ type: "loadUrl", url: resolved } satisfies WorkerRequest),
     );
   },
 
