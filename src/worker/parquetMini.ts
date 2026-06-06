@@ -29,9 +29,6 @@ class W {
   /** Write a single byte. */
   byte(v: number) { this.b.push(v & 0xff); }
 
-  /** Write raw bytes inline (no length prefix — for struct embedding). */
-  raw(data: Uint8Array) { for (const b of data) this.b.push(b); }
-
   /** STOP byte (end of struct). */
   stop() { this.b.push(0); }
 
@@ -69,12 +66,6 @@ class W {
     const bytes = new TextEncoder().encode(s);
     this.uvarint(bytes.length);
     for (const b of bytes) this.byte(b);
-  }
-
-  /** Binary blob: length (unsigned varint) + bytes. */
-  bin(data: Uint8Array) {
-    this.uvarint(data.length);
-    for (const b of data) this.byte(b);
   }
 
   /**
@@ -118,11 +109,8 @@ class W {
 // Parquet constants
 // ---------------------------------------------------------------------------
 
-// Parquet type constants (values match the Parquet Thrift enum)
-export const PType  = { BOOLEAN: 0, INT32: 1, INT64: 2, INT96: 3, FLOAT: 4, DOUBLE: 5, BYTE_ARRAY: 6 };
-export const Codec  = { UNCOMPRESSED: 0, SNAPPY: 1, GZIP: 2, BROTLI: 3, ZSTD: 6 };
-export const Enc    = { PLAIN: 0, PLAIN_DICTIONARY: 2, RLE: 3, BIT_PACKED: 4, RLE_DICTIONARY: 8 };
-const Rep    = { REQUIRED: 0, OPTIONAL: 1, REPEATED: 2 };
+// Parquet field repetition constants (values match the Parquet Thrift enum).
+const Rep = { REQUIRED: 0, OPTIONAL: 1, REPEATED: 2 };
 
 // ---------------------------------------------------------------------------
 // Public interface

@@ -72,6 +72,38 @@ function keyForSpectrumIndex(
   return null;
 }
 
+/** Blit an RGBA byte raster into a 2D context at intrinsic (one-px-per-cell) resolution. */
+function blit(
+  ctx: CanvasRenderingContext2D,
+  rgba: Uint8ClampedArray,
+  w: number,
+  h: number,
+): void {
+  const img = new ImageData(w, h);
+  img.data.set(rgba);
+  ctx.putImageData(img, 0, 0);
+}
+
+/**
+ * Stroke a 1px contrast selection ring on grid cell `key`. The colour is
+ * luminance-picked from the cell's RGBA so it stays visible against both colormap
+ * extremes and the absent-pixel sentinel (D-06).
+ */
+function strokeSelectionRing(
+  ctx: CanvasRenderingContext2D,
+  rgba: Uint8ClampedArray,
+  key: number,
+  width: number,
+): void {
+  const x0 = key % width;
+  const y0 = Math.floor(key / width);
+  const o = key * 4;
+  const lum = 0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2];
+  ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
+}
+
 /**
  * Derive a filename stem from fileMeta.run or a fallback string.
  * Returns e.g. "dataset" when nothing is available.
@@ -183,10 +215,20 @@ export function ImagingPanel({
     optical: number;
   }>({ tic: 1, ion: 0.6, rgb: 0, optical: 0 });
 
-  // Store the last rasterized ion image RGBA for re-blit during overlays.
-  const ionRgbaRef = useRef<Uint8ClampedArray | null>(null);
-  // Store the last rasterized TIC RGBA for re-blit during ROI overlays.
-  const ticRgbaRef = useRef<Uint8ClampedArray | null>(null);
+  // Shared rasterizeImage options for the ion image (used by its paint effect and
+  // the blend compositor) — one source of truth for colormap/scale/BL modifiers.
+  const ionOpts = useMemo(
+    () => ({
+      colormap,
+      percentile,
+      logScale: scale === "log",
+      tic: ticNorm ? tic : null,
+      ticNorm,
+      smoothSigma,
+      histogramMode,
+    }),
+    [colormap, percentile, scale, ticNorm, tic, smoothSigma, histogramMode],
+  );
 
   const [readout, setReadout] = useState<{ text: string; muted: boolean }>({
     text: "",
@@ -221,7 +263,7 @@ export function ImagingPanel({
   const [mcMz, setMcMz] = useState<[string, string, string]>(["", "", ""]);
   // Per-channel tolerance is fixed at 0.5 Da (the editing control moved out of the
   // toolbar in Phase 4); still read by handleRenderMultiChannel.
-  const [mcTol] = useState<[string, string, string]>(["0.5", "0.5", "0.5"]);
+  const mcTol = ["0.5", "0.5", "0.5"] as const;
 
   // BL-06: ROI drag state
   type DragState = {
@@ -237,8 +279,10 @@ export function ImagingPanel({
   const [roiRect, setRoiRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [liveDrag, setLiveDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
-  // Paint pass: rasterize the TIC into ImageData and blit at intrinsic resolution
-  // (one device pixel per grid cell). Keyed on [tic, grid].
+  // Overview TIC paint + selection ring. The ion/TIC canvases mount only when
+  // their view is active, so `view` is a load-bearing dep: switching back to a
+  // tab remounts a blank canvas that must be repainted. colormap/scale: the
+  // overview TIC honors the global colormap + scale (UAT-r3).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !grid || !tic) return;
@@ -247,48 +291,14 @@ export function ImagingPanel({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const rgba = rasterizeTic(tic, grid, colormap, scale === "log");
-    ticRgbaRef.current = rgba;
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(rgba);
-    ctx.putImageData(img, 0, 0);
-    // view dep: the TIC canvas mounts only when the overview view is active;
-    // returning to it remounts a blank canvas, so re-run on view change.
-    // colormap/scale: the overview TIC honors the global colormap + scale (UAT-r3).
-  }, [tic, grid, view, colormap, scale]);
-
-  // Selection-ring pass (runs AFTER the paint pass): re-blit, then stroke a 1px
-  // contrast ring on the selected cell. Keyed on [selectedIndex, tic, grid].
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !grid || !tic) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    // putImageData overwrites the composite, so re-blit before stroking the ring.
-    const rgba = rasterizeTic(tic, grid, colormap, scale === "log");
-    ticRgbaRef.current = rgba;
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(rgba);
-    ctx.putImageData(img, 0, 0);
-
+    blit(ctx, rgba, grid.width, grid.height);
     if (selectedIndex == null) return;
     const key = keyForSpectrumIndex(grid, selectedIndex);
-    if (key == null) return;
-    const x0 = key % grid.width;
-    const y0 = Math.floor(key / grid.width);
-    // Contrast-pick the ring color from the selected pixel's luminance so it is
-    // visible against both colormap extremes and the absent-pixel sentinel (D-06).
-    const o = key * 4;
-    const lum =
-      0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2];
-    ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
-    // view: re-blit on remount (same mount-after-data reason).
+    if (key != null) strokeSelectionRing(ctx, rgba, key, grid.width);
   }, [selectedIndex, tic, grid, view, colormap, scale]);
 
-  // Phase 4 — ion image PAINT effect: rasterize the ion image with chosen colormap/scale/percentile.
-  // BL-01/04/07: also keyed on [ticNorm, smoothSigma, histogramMode].
-  // BL-06: also keyed on [roiRect] to repaint ROI overlay.
+  // Ion image paint + selection ring. ROI is a DOM overlay (roiOverlay), not
+  // drawn here. roiRect is kept as a dep so the ring repaints alongside it.
   useEffect(() => {
     const canvas = ionCanvasRef.current;
     if (!canvas || !grid || !ionImage) return;
@@ -296,61 +306,12 @@ export function ImagingPanel({
     canvas.height = grid.height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const rgba = rasterizeImage(ionImage, grid, {
-      colormap,
-      percentile,
-      logScale: scale === "log",
-      tic: ticNorm ? tic : null,
-      ticNorm,
-      smoothSigma,
-      histogramMode,
-    });
-    ionRgbaRef.current = rgba;
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(rgba);
-    ctx.putImageData(img, 0, 0);
-    // view dependency: the ion canvas only mounts when its view is active, so
-    // switching INTO the view after ionImage already arrived must re-run this
-    // paint (deps would otherwise be unchanged and the fresh canvas stays blank).
-  }, [ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, view]);
-
-  // Phase 4 — ion image RING effect: re-blit then stroke the ring for the selected cell.
-  // BL-01/04/07: also keyed on [ticNorm, smoothSigma, histogramMode].
-  // BL-06: also draws ROI overlay rectangle.
-  // Re-blit first (Pitfall 6 — putImageData clears the composite).
-  useEffect(() => {
-    const canvas = ionCanvasRef.current;
-    if (!canvas || !grid || !ionImage) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    // Re-blit before stroking — putImageData clears composite (Pitfall 6).
-    const rgba = rasterizeImage(ionImage, grid, {
-      colormap,
-      percentile,
-      logScale: scale === "log",
-      tic: ticNorm ? tic : null,
-      ticNorm,
-      smoothSigma,
-      histogramMode,
-    });
-    ionRgbaRef.current = rgba;
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(rgba);
-    ctx.putImageData(img, 0, 0);
-    // ROI rectangle is now a DOM overlay (roiOverlay), not drawn into the canvas.
-
+    const rgba = rasterizeImage(ionImage, grid, ionOpts);
+    blit(ctx, rgba, grid.width, grid.height);
     if (selectedIndex == null) return;
     const key = keyForSpectrumIndex(grid, selectedIndex);
-    if (key == null) return;
-    const x0 = key % grid.width;
-    const y0 = Math.floor(key / grid.width);
-    const o = key * 4;
-    const lum =
-      0.2126 * rgba[o] + 0.7152 * rgba[o + 1] + 0.0722 * rgba[o + 2];
-    ctx.strokeStyle = lum > 140 ? "#000000" : "#ffffff";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x0 + 0.5, y0 + 0.5, 1, 1);
-  }, [selectedIndex, ionImage, grid, colormap, scale, percentile, ticNorm, tic, smoothSigma, histogramMode, roiRect, view]);
+    if (key != null) strokeSelectionRing(ctx, rgba, key, grid.width);
+  }, [selectedIndex, ionImage, grid, ionOpts, roiRect, view]);
 
   // BL-02: Multi-channel canvas paint.
   useEffect(() => {
@@ -360,10 +321,7 @@ export function ImagingPanel({
     canvas.height = grid.height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const rgba = rasterizeMultiChannel(multiChannel.images, grid, tic ?? null, ticNorm);
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(rgba);
-    ctx.putImageData(img, 0, 0);
+    blit(ctx, rasterizeMultiChannel(multiChannel.images, grid, tic ?? null, ticNorm), grid.width, grid.height);
     // view dependency: same mount-after-data issue as the ion canvas above.
   }, [multiChannel, grid, tic, ticNorm, view]);
 
@@ -388,15 +346,11 @@ export function ImagingPanel({
     if (opticalPlaced && grid) {
       canvas.width = grid.width;
       canvas.height = grid.height;
-      const img = new ImageData(grid.width, grid.height);
-      img.data.set(opticalPlaced);
-      ctx.putImageData(img, 0, 0);
+      blit(ctx, opticalPlaced, grid.width, grid.height);
     } else {
       canvas.width = decodedOptical.width;
       canvas.height = decodedOptical.height;
-      const img = new ImageData(decodedOptical.width, decodedOptical.height);
-      img.data.set(decodedOptical.rgba);
-      ctx.putImageData(img, 0, 0);
+      blit(ctx, decodedOptical.rgba, decodedOptical.width, decodedOptical.height);
     }
   }, [view, decodedOptical, opticalPlaced, grid]);
 
@@ -430,18 +384,7 @@ export function ImagingPanel({
         blendOpacity.rgb,
       ]);
     if (ionImage && blendOpacity.ion > 0)
-      layers.push([
-        rasterizeImage(ionImage, grid, {
-          colormap,
-          percentile,
-          logScale: scale === "log",
-          tic: ticNorm ? tic : null,
-          ticNorm,
-          smoothSigma,
-          histogramMode,
-        }),
-        blendOpacity.ion,
-      ]);
+      layers.push([rasterizeImage(ionImage, grid, ionOpts), blendOpacity.ion]);
 
     // Effective alpha = slider opacity × per-pixel alpha/255, so a layer's
     // transparent pixels (e.g. outside the optical footprint) don't paint.
@@ -455,9 +398,7 @@ export function ImagingPanel({
         out[o + 2] = rgba[o + 2] * la + out[o + 2] * inv;
       }
     }
-    const img = new ImageData(grid.width, grid.height);
-    img.data.set(out);
-    ctx.putImageData(img, 0, 0);
+    blit(ctx, out, grid.width, grid.height);
   }, [
     view,
     blendOpacity,
@@ -466,13 +407,10 @@ export function ImagingPanel({
     multiChannel,
     opticalPlaced,
     grid,
-    stats,
     colormap,
     scale,
-    percentile,
     ticNorm,
-    smoothSigma,
-    histogramMode,
+    ionOpts,
   ]);
 
   // Grid is null until the first "Show Ion Image" click triggers lazy init.
@@ -605,7 +543,7 @@ export function ImagingPanel({
     return { text: xy, muted: false };
   }
 
-  // ── Unified pointer handlers for ALL image canvases (tic / base-peak / ion /
+  // ── Unified pointer handlers for ALL image canvases (tic / ion /
   // multi). `e.currentTarget` is the active canvas. A plain click selects a
   // pixel; a drag (≥2px) selects a rectangular ROI and renders its mean
   // spectrum. The ROI rectangle is a DOM overlay (gridRectToPx), so it draws and
@@ -826,12 +764,9 @@ export function ImagingPanel({
   // through rasterizeImage/rasterizeTic, which honor the store colormap + scale).
   // Hidden on multi (fixed R/G/B) and blend (composites its own layers).
   const showColormapCtl = view === "ion" || view === "overview";
-  // Single hover readout for all views (onImgMove tailors the text per view).
-  const activeReadout = readout;
   const ticHasImage = view === "overview" && tic !== null && grid !== null;
   const ionHasImage = view === "ion" && ionImage !== null && grid !== null;
   const showLegend = ticHasImage || ionHasImage;
-  const legendColormap: "viridis" | "inferno" | "gray" = colormap;
 
   return (
     <>
@@ -1170,7 +1105,7 @@ export function ImagingPanel({
         {/* Floating legend (tic / ion — not multi) */}
         {showLegend && (
           <div className="stage__legend">
-            <ColormapScale colormap={legendColormap} onStage low="0" high="max" />
+            <ColormapScale colormap={colormap} onStage low="0" high="max" />
           </div>
         )}
 
@@ -1195,12 +1130,12 @@ export function ImagingPanel({
         )}
 
         {/* Floating hover readout */}
-        {activeReadout.text && (
+        {readout.text && (
           <div className="stage__readout">
             {view === "overview" ? (
               <span data-testid="tic-hover-readout">{readout.text}</span>
             ) : (
-              activeReadout.text
+              readout.text
             )}
           </div>
         )}

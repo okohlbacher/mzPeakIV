@@ -38,12 +38,6 @@ type State = {
   grid: ImagingGrid | null;
   /** TIC raster (length width*height) for the imaging grid; null when non-imaging or uncomputable (D-02). */
   tic: Float32Array | null;
-  /**
-   * Base-peak m/z image (Option C): one m/z value per grid cell indicating the
-   * dominant mass at each pixel. Built via fast column projection (~490 KB read)
-   * without the full 553 MB metadata download. Used for false-color overview.
-   */
-  basePeakMz: Float32Array | null;
   /** D-08 named warning: set only when a file mixes profile + centroid spectra. */
   mixedRepresentationWarning: string | null;
   stage: LoadStage;
@@ -182,7 +176,6 @@ const initialState: State = {
   capabilities: null,
   grid: null,
   tic: null,
-  basePeakMz: null,
   mixedRepresentationWarning: null,
   stage: "idle",
   error: null,
@@ -460,7 +453,6 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         capabilities: r.capabilities ?? prev.capabilities,
         grid: r.grid ?? prev.grid,
         tic: r.tic ?? prev.tic,
-        basePeakMz: r.basePeakMz ?? prev.basePeakMz,
         mixedRepresentationWarning:
           r.mixedRepresentationWarning ?? prev.mixedRepresentationWarning,
         opticalImages,

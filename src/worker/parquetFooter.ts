@@ -255,12 +255,10 @@ function decodeColumnMetaData(r: TR, colInfos: Map<string, ColInfo> | null) {
     switch (prevId) {
       case 1: info.parquetType = r.i32(); break;         // Type enum
       case 2: {
-        // encodings (list<Encoding>) — read them
-        const [t, n] = r.listHeader();
+        // encodings (list<Encoding>) — elemType ignored; we iterate as i32 enums.
+        const [, n] = r.listHeader();
         for (let i = 0; i < n; i++) {
-          const enc = r.i32();
-          (info.encodings ??= []).push(enc);
-          void t; // listHeader returns elemType but we iterate as i32 enums
+          (info.encodings ??= []).push(r.i32());
         }
         break;
       }

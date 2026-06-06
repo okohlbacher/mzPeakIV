@@ -20,6 +20,14 @@ import type { HistogramMode } from "../compute/histogram";
  */
 const SENTINEL: readonly [number, number, number] = [0x1a, 0x1a, 0x1a];
 
+/** Write the absent-pixel SENTINEL (opaque) into `out` at byte offset `o`. */
+function writeSentinel(out: Uint8ClampedArray, o: number): void {
+  out[o] = SENTINEL[0];
+  out[o + 1] = SENTINEL[1];
+  out[o + 2] = SENTINEL[2];
+  out[o + 3] = 255;
+}
+
 // ── Colormap type ─────────────────────────────────────────────────────────────
 
 /** Available colormaps for rasterizeImage (IMAGE-03). */
@@ -197,10 +205,7 @@ export function rasterizeImage(
   for (let k = 0; k < total; k++) {
     const o = k * 4;
     if (presenceMask[k] === 0) {
-      out[o] = SENTINEL[0];
-      out[o + 1] = SENTINEL[1];
-      out[o + 2] = SENTINEL[2];
-      out[o + 3] = 255;
+      writeSentinel(out, o);
       continue;
     }
     const raw = working[k];
@@ -312,10 +317,7 @@ export function rasterizeMultiChannel(
   for (let k = 0; k < total; k++) {
     const o = k * 4;
     if (presenceMask[k] === 0) {
-      out[o] = SENTINEL[0];
-      out[o + 1] = SENTINEL[1];
-      out[o + 2] = SENTINEL[2];
-      out[o + 3] = 255;
+      writeSentinel(out, o);
       continue;
     }
     // Map each channel to [0, 255].
@@ -329,67 +331,5 @@ export function rasterizeMultiChannel(
     out[o + 3] = 255;
   }
 
-  return out;
-}
-
-/**
- * Render a base-peak m/z image as a hue-cycle false-color map.
- *
- * Each pixel is colored by its dominant mass (base-peak m/z):
- *   - m/z mapped linearly to hue in [0°, 300°] (violet-red cycle, avoiding red-red wrap)
- *   - Saturation = 1, Value = 1 (vivid) for signal; absent pixels → SENTINEL
- *
- * This is a low-cost "differentiating overview": pixels with the same chemical
- * composition share similar colors, making tissue regions visually separable
- * without running PCA or reading spectral arrays.
- *
- * @param basePeakMz  Float32Array — one m/z value per grid cell (0 = absent or unknown)
- * @param grid        ImagingGrid — presence mask and dimensions
- * @param mzMin       Global minimum m/z (for hue normalization)
- * @param mzMax       Global maximum m/z (for hue normalization)
- */
-export function rasterizeBasePeakMap(
-  basePeakMz: Float32Array,
-  grid: ImagingGrid,
-  mzMin: number,
-  mzMax: number,
-): Uint8ClampedArray {
-  const { width, height, presenceMask } = grid;
-  const out = new Uint8ClampedArray(width * height * 4);
-  const mzRange = mzMax - mzMin;
-
-  for (let k = 0; k < width * height; k++) {
-    const base = k * 4;
-    if (presenceMask[k] === 0 || basePeakMz[k] === 0) {
-      out[base] = SENTINEL[0];
-      out[base + 1] = SENTINEL[1];
-      out[base + 2] = SENTINEL[2];
-      out[base + 3] = 255;
-      continue;
-    }
-    // Map m/z → hue in [0, 300] degrees (stops short of full 360 to avoid
-    // red-on-red ambiguity between lowest and highest m/z).
-    const t = mzRange > 0 ? Math.max(0, Math.min(1, (basePeakMz[k] - mzMin) / mzRange)) : 0.5;
-    const h = t * 300; // degrees
-    // HSV(h, 1, 1) → RGB
-    const i = Math.floor(h / 60) % 6;
-    const f = h / 60 - Math.floor(h / 60);
-    const p = 0;
-    const q = 1 - f;
-    const tv = f;
-    let r: number, g: number, b: number;
-    switch (i) {
-      case 0: r = 1; g = tv; b = p; break;
-      case 1: r = q; g = 1; b = p; break;
-      case 2: r = p; g = 1; b = tv; break;
-      case 3: r = p; g = q; b = 1; break;
-      case 4: r = tv; g = p; b = 1; break;
-      default: r = 1; g = p; b = q; break;
-    }
-    out[base] = Math.round(r * 255);
-    out[base + 1] = Math.round(g * 255);
-    out[base + 2] = Math.round(b * 255);
-    out[base + 3] = 255;
-  }
   return out;
 }

@@ -136,6 +136,37 @@ function manifestFromStore(store: ZipStorage<any>): ManifestEntry[] {
 }
 
 /**
+ * Open the spectra "data arrays" Parquet member of the active archive as a
+ * ParquetFile, or null when the archive/member is unavailable. Shared by every
+ * point-layout read (ion image, multi-channel, per-pixel + ROI spectra).
+ */
+async function openSpectraDataParquet(): Promise<ParquetFile | null> {
+  if (!activeZipStorage) return null;
+  const entry = activeZipStorage.fileIndex.files.find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
+  );
+  if (!entry) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const blob = await activeZipStorage.open((entry as any).name);
+  if (!blob) return null;
+  return ParquetFile.fromFile(blob as unknown as Blob);
+}
+
+/**
+ * Extract the `point.{spectrum_index,mz,intensity}` Arrow child vectors from a
+ * row-group table, or null when the table is malformed / missing a column.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pointVecs(table: any): { si: any; mz: any; inten: any } | null {
+  const p = table.getChild("point");
+  const si = p?.getChild("spectrum_index");
+  const mz = p?.getChild("mz");
+  const inten = p?.getChild("intensity");
+  return si && mz && inten ? { si, mz, inten } : null;
+}
+
+/**
  * Fast load: opens the ZIP and reads ONLY mzpeak_index.json (~600 bytes).
  * No Parquet data is read. Emits loadResult immediately with manifest +
  * capabilities.isImaging; fileMeta/stats/grid/tic are all null (lazy).
@@ -248,25 +279,19 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; tic: Float32Array | null } | null> {
-  if (!activeZipStorage) { console.log("[BGF] no ZipStorage"); return null; }
-  const T = () => Date.now();
-  const t0 = T();
-  const dt = (label: string) => console.log(`[BGF +${T()-t0}ms] ${label}`);
+  if (!activeZipStorage) { return null; }
   try {
-    dt("start");
     // BUG FIX: spectrumMetadata() returns ParquetFile (not RemoteBlob).
     // Use open(name) to get the actual RemoteBlob with .start/.size properties.
     const metaEntry = activeZipStorage.fileIndex.files.find(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (f: any) => f.entityType === "spectrum" && f.dataKind === "metadata",
     );
-    if (!metaEntry) { dt("no metadata entry in fileIndex"); return null; }
-    dt(`metadata file: ${(metaEntry as any).name}`);
+    if (!metaEntry) { return null; }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const metaBlob = await activeZipStorage.open((metaEntry as any).name);
-    if (!metaBlob) { dt("open() returned null"); return null; }
-    dt(`metaBlob: start=${(metaBlob as any).start} size=${(metaBlob as any).size}`);
+    if (!metaBlob) { return null; }
 
     // Use RemoteBlob.slice().arrayBuffer() directly — works for both URL and
     // local file loads (HttpRangeReader and BlobReader respectively).
@@ -275,21 +300,16 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       size: (metaBlob as any).size as number,
       slice: (s: number, e: number) => ({
         arrayBuffer: async () => {
-          const t1 = T();
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const slice = (metaBlob as any).slice(s, e);
           const buf = await slice.arrayBuffer() as ArrayBuffer;
-          dt(`  slice(${s},${e}) → ${buf.byteLength}B in ${T()-t1}ms`);
           return buf;
         },
       }),
     };
 
-    dt("reading footer...");
     const footerBytes = await readParquetFooter(blobLike);
-    dt(`footer ${footerBytes.byteLength}B read, parsing...`);
     const colInfoMap = decodeFooter(footerBytes);
-    dt(`decoded footer, ${colInfoMap.size} columns found`);
 
     const targetPaths = [
       ["scan", "IMS_1000050_position_x"],
@@ -310,14 +330,12 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
     for (const path of targetPaths) {
       const dotPath = path.join(".");
       const colInfo = colInfoMap.get(dotPath);
-      if (!colInfo) { dt(`MISSING col: ${dotPath}`); continue; }
-      dt(`fetching ${dotPath}: dp=${colInfo.dataPageOffset} dict=${colInfo.dictPageOffset} size=${colInfo.compressedSize}`);
+      if (!colInfo) { continue; }
       const fetchStart = colInfo.dictPageOffset > 0
         ? Math.min(colInfo.dictPageOffset, colInfo.dataPageOffset)
         : colInfo.dataPageOffset;
       const dataPageOffsetInChunk = colInfo.dataPageOffset - fetchStart;
       const buf = await blobLike.slice(fetchStart, fetchStart + colInfo.compressedSize).arrayBuffer();
-      dt(`  got ${buf.byteLength}B`);
       // Use type/codec/encodings from footer — don't hardcode.
       const enc = colInfo.encodings.length > 0
         ? colInfo.encodings
@@ -333,23 +351,16 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
         dataPageOffsetInChunk,
       });
     }
-    if (chunks.length < 2) { dt(`not enough cols: ${chunks.length}`); return null; }
+    if (chunks.length < 2) { return null; }
 
     const totalRows = chunks[0].numValues;
-    const totalKB = (chunks.reduce((s,c)=>s+c.data.length,0)/1024).toFixed(1);
-    dt(`building mini-Parquet: ${chunks.length} cols, ${totalKB}KB, ${totalRows} rows`);
-
     const miniParquet = buildMiniParquet(chunks, totalRows);
-    dt(`mini-Parquet built: ${miniParquet.byteLength}B — calling readParquet...`);
     const rawTable = readParquet(miniParquet);
-    dt("readParquet done — converting to Arrow...");
     const table = tableFromIPC(rawTable.intoIPCStream());
-    dt(`Arrow table: ${table.numRows} rows`);
 
     const nRows = table.numRows;
-    if (nRows === 0) { dt("0 rows!"); return null; }
+    if (nRows === 0) { return null; }
 
-    dt(`row iteration (${nRows} rows)...`);
     const xArr: number[] = new Array(nRows);
     const yArr: number[] = new Array(nRows);
     const ticArr: number[] = new Array(nRows);
@@ -366,7 +377,6 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       if (lo > 0 && lo < globalMinMz) globalMinMz = lo;
       if (hi > globalMaxMz) globalMaxMz = hi;
     }
-    dt(`row iteration done — building grid...`);
 
     const coords = xArr.map((x, i) => ({ x, y: yArr[i] }));
     const spectrumIndices = Array.from({ length: nRows }, (_, i) => i);
@@ -382,8 +392,7 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
       geometrySource: "discovery-block" as const,
     } : null;
     const grid = buildImagingGrid(coords, spectrumIndices, geometry, "promoted-columns");
-    if (!grid) { dt("buildImagingGrid returned null"); return null; }
-    dt(`grid ${grid.width}x${grid.height} — building TIC...`);
+    if (!grid) { return null; }
 
     const base = grid.coordinateBase ?? 1;
     const tic = new Float32Array(grid.width * grid.height);
@@ -402,7 +411,6 @@ async function buildGridFast(): Promise<{ grid: ImagingGrid; stats: FileStats; t
 
     activeGrid = grid;
     activeStats = stats;  // set so fast render path has access to representationCounts
-    dt(`DONE ✓ grid=${grid.width}x${grid.height} tic.length=${tic.length} mzRange=[${globalMinMz.toFixed(1)},${globalMaxMz.toFixed(1)}]`);
     return { grid, stats, tic };
   } catch (e) {
     const errMsg = e instanceof Error ? `${e.name}: ${e.message}
@@ -507,17 +515,8 @@ async function computeIonImageFast(
 ): Promise<Float32Array | null> {
   if (!activeZipStorage || !activeGrid) return null;
 
-  // spectrumData() returns ParquetFile not RemoteBlob; use open() for the RemoteBlob
-  const dataEntry2 = activeZipStorage.fileIndex.files.find(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
-  );
-  if (!dataEntry2) return null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dataBlob = await activeZipStorage.open((dataEntry2 as any).name);
-  if (!dataBlob) return null;
-
-  const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+  const pf = await openSpectraDataParquet();
+  if (!pf) return null;
   const nRG = pf.metadata().numRowGroups();
 
   // Accumulate intensity sums per spectrum_index across all row groups.
@@ -528,17 +527,10 @@ async function computeIonImageFast(
     const rawTable = await pf.read({ rowGroups: [rg] });
     const table = tableFromIPC(rawTable.intoIPCStream());
 
-    // Column-based extraction — 75x faster than row.get(r) for 1M-row tables.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pointCol: any = table.getChild("point");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const siVec: any = pointCol?.getChild("spectrum_index");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mzVec: any = pointCol?.getChild("mz");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const intensVec: any = pointCol?.getChild("intensity");
-
-    if (!siVec || !mzVec || !intensVec) continue; // skip malformed row groups
+    // Column-based extraction — far faster than row.get(r) for 1M-row tables.
+    const v = pointVecs(table);
+    if (!v) continue; // skip malformed row groups
+    const { si: siVec, mz: mzVec, inten: intensVec } = v;
 
     const nRows = table.numRows;
     for (let r = 0; r < nRows; r++) {
@@ -576,16 +568,8 @@ async function computeMultiIonImagesFast(
   const nullResult = () => windows.map(() => null);
   if (!activeZipStorage || !activeGrid) return nullResult();
 
-  const dataEntry = activeZipStorage.fileIndex.files.find(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
-  );
-  if (!dataEntry) return nullResult();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dataBlob = await activeZipStorage.open((dataEntry as any).name);
-  if (!dataBlob) return nullResult();
-
-  const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+  const pf = await openSpectraDataParquet();
+  if (!pf) return nullResult();
   const nRG = pf.metadata().numRowGroups();
 
   // One sparse accumulator per non-null window.
@@ -594,15 +578,9 @@ async function computeMultiIonImagesFast(
   for (let rg = 0; rg < nRG; rg++) {
     const rawTable = await pf.read({ rowGroups: [rg] });
     const table = tableFromIPC(rawTable.intoIPCStream());
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pointCol: any = table.getChild("point");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const siVec: any = pointCol?.getChild("spectrum_index");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mzVec: any = pointCol?.getChild("mz");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const intensVec: any = pointCol?.getChild("intensity");
-    if (!siVec || !mzVec || !intensVec) continue;
+    const v = pointVecs(table);
+    if (!v) continue;
+    const { si: siVec, mz: mzVec, inten: intensVec } = v;
 
     const nRows = table.numRows;
     for (let r = 0; r < nRows; r++) {
@@ -655,29 +633,11 @@ async function computeMultiIonImagesFast(
  */
 async function readFastSpectrum(index: number): Promise<boolean> {
   if (!activeZipStorage) return false;
-  const T0 = Date.now();
-  const rlog = (msg: string) => console.log(`[RFS idx=${index} +${Date.now()-T0}ms] ${msg}`);
-  rlog("start");
   try {
-    // spectrumData() returns ParquetFile (wrong type for fromFile).
-    // Use open() to get the actual RemoteBlob, same approach as buildGridFast.
-    const dataEntry = activeZipStorage.fileIndex.files.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
-    );
-    if (!dataEntry) { rlog("NO dataEntry in fileIndex"); return false; }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rlog(`dataEntry=${(dataEntry as any).name}`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dataBlob = await activeZipStorage.open((dataEntry as any).name);
-    if (!dataBlob) { rlog("open() returned null"); return false; }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rlog(`blob size=${(dataBlob as any).size}`);
-
-    const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+    const pf = await openSpectraDataParquet();
+    if (!pf) return false;
     const meta = pf.metadata();
     const nRG = meta.numRowGroups();
-    rlog(`fromFile ok, nRG=${nRG}`);
 
     // Find row group containing this spectrum_index via min/max statistics.
     // statistics() returns `any` from parquet-wasm — access properties safely.
@@ -692,12 +652,10 @@ async function readFastSpectrum(index: number): Promise<boolean> {
         if (!stats) {
           // No stats — fall back to linear scan: assume ~893 spectra per row group
           targetRG = Math.min(Math.floor(index / 900), nRG - 1);
-          rlog(`RG${rg}: no stats, fallback targetRG=${targetRG}`);
           break;
         }
         const minVal = Number(stats.minValue ?? stats.min_value ?? -Infinity);
         const maxVal = Number(stats.maxValue ?? stats.max_value ?? Infinity);
-        rlog(`RG${rg}: si_min=${minVal} si_max=${maxVal} → ${index >= minVal && index <= maxVal ? "MATCH" : "skip"}`);
         if (index >= minVal && index <= maxVal) targetRG = rg;
         break;
       }
@@ -707,33 +665,16 @@ async function readFastSpectrum(index: number): Promise<boolean> {
     if (targetRG < 0) {
       // Final fallback: try the last row group
       targetRG = nRG - 1;
-      rlog(`no RG matched, fallback to last RG=${targetRG}`);
     }
-    rlog(`targetRG=${targetRG}`);
 
     // Read only the target row group.
     const rawTable = await pf.read({ rowGroups: [targetRG] });
-    rlog(`pf.read done`);
     const table = tableFromIPC(rawTable.intoIPCStream());
-    rlog(`Arrow table: ${table.numRows} rows`);
 
-    // Column-based extraction — 75x faster than row.get(r) for 1M-row tables.
-    // Arrow struct column → child columns accessed as typed vectors.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pointCol: any = table.getChild("point");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const siVec: any = pointCol?.getChild("spectrum_index");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mzVec: any = pointCol?.getChild("mz");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const intensVec: any = pointCol?.getChild("intensity");
-
-    if (!siVec || !mzVec || !intensVec) {
-      // Column structure doesn't match — fall through to slow row iteration as fallback
-      rlog(`missing columns: si=${!!siVec} mz=${!!mzVec} inten=${!!intensVec}`);
-      rlog(`table schema: ${JSON.stringify(table.schema?.fields?.map((f: any) => f.name))}`);
-      return false;
-    }
+    // Column-based extraction — far faster than row.get(r) for 1M-row tables.
+    const v = pointVecs(table);
+    if (!v) return false; // column structure doesn't match
+    const { si: siVec, mz: mzVec, inten: intensVec } = v;
 
     const n = table.numRows;
     const mzValues: number[] = [];
@@ -747,9 +688,7 @@ async function readFastSpectrum(index: number): Promise<boolean> {
       intensityValues.push(Number(intensVec.get(r)));
     }
 
-    rlog(`found ${mzValues.length} peaks`);
     if (mzValues.length === 0) {
-      rlog(`first row si=${Number(siVec.get(0))} mz=${Number(mzVec.get(0))}`);
       return false;
     }
 
@@ -767,7 +706,6 @@ async function readFastSpectrum(index: number): Promise<boolean> {
       { type: "spectrumResult", spectrum },
       [mzArr.buffer, intArr.buffer],
     );
-    rlog(`spectrumResult sent ✓`);
     return true;
   } catch (e) {
     console.warn("[mzPeakWorker] readFastSpectrum FAILED:", e);
@@ -820,16 +758,8 @@ async function _computeMeanSpectrumFrom(
 ): Promise<{ index: number; id: string; mz: Float64Array; intensity: Float32Array } | null> {
   const MAX_SAMPLES = 300;
   try {
-    const dataEntry = activeZipStorage!.fileIndex.files.find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (f: any) => f.entityType === "spectrum" && f.dataKind === "data arrays",
-    );
-    if (!dataEntry) return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const dataBlob = await activeZipStorage!.open((dataEntry as any).name);
-    if (!dataBlob) return null;
-
-    const pf = await ParquetFile.fromFile(dataBlob as unknown as Blob);
+    const pf = await openSpectraDataParquet();
+    if (!pf) return null;
     const meta = pf.metadata();
     const nRG = meta.numRowGroups();
 
@@ -880,16 +810,9 @@ async function _computeMeanSpectrumFrom(
       const rawTable = await pf.read({ rowGroups: [rg] });
       const table = tableFromIPC(rawTable.intoIPCStream());
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pointCol: any = table.getChild("point");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const siVec: any = pointCol?.getChild("spectrum_index");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mzVec: any = pointCol?.getChild("mz");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const intensVec: any = pointCol?.getChild("intensity");
-
-      if (!siVec || !mzVec || !intensVec) continue;
+      const v = pointVecs(table);
+      if (!v) continue;
+      const { si: siVec, mz: mzVec, inten: intensVec } = v;
 
       const nRows = table.numRows;
 
