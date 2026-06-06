@@ -1,6 +1,6 @@
 export interface ColormapScaleProps {
   /** @default "viridis" */
-  colormap?: "viridis" | "inferno" | "gray" | "basepeak";
+  colormap?: "viridis" | "inferno" | "gray";
   /** Low-end tick label. @default "0" */
   low?: string;
   /** High-end tick label. @default "max" */

@@ -43,9 +43,4 @@
 
   /* Grayscale — neutral intensity ramp */
   --gradient-gray: linear-gradient(90deg, #000000 0%, #ffffff 100%); /* @kind color */
-
-  /* Base-peak m/z hue cycle (violet→red, stops short of wrap) */
-  --gradient-basepeak: linear-gradient(
-    90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff
-  ); /* @kind color */
 }

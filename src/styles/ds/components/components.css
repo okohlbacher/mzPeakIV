@@ -258,7 +258,6 @@
 .mz-cmap__bar--viridis { background: var(--gradient-viridis); }
 .mz-cmap__bar--inferno { background: var(--gradient-inferno); }
 .mz-cmap__bar--gray    { background: var(--gradient-gray); }
-.mz-cmap__bar--basepeak{ background: var(--gradient-basepeak); }
 .mz-cmap__ticks {
   display: flex;
   justify-content: space-between;
