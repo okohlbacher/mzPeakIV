@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PanelLeft, FolderOpen } from "lucide-react";
+import { PanelLeft, FolderOpen, ShieldCheck } from "lucide-react";
 
 import { useStore } from "../state/store";
 import { STAGE_LABEL } from "./stageLabels";
@@ -229,6 +229,15 @@ export function App() {
             </div>
             <FileLoader loading={loading} />
             {loading && <ProgressBar stage={stage} />}
+            <p className="loader__note" data-testid="privacy-note">
+              <ShieldCheck size={14} aria-hidden="true" />
+              <span>
+                <strong>Private by design.</strong> Your file is read and analyzed
+                entirely in your browser — no upload, no server, no tracking. A
+                local file never leaves your device; a URL is fetched directly into
+                the browser.
+              </span>
+            </p>
           </div>
         </div>
       )}
