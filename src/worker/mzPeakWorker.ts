@@ -82,19 +82,22 @@ let activeSourceUrl: string | null = null;
  * step) happens exactly once per load instead of once per render.
  */
 let activeIonCache: {
-  mz: Float32Array;
+  mz: Float64Array;
   pix: Uint16Array | Int32Array;
   inten: Float32Array;
 } | null = null;
+/** spectrum_index → pixel (grid key), captured when the index is built. Lets the
+ *  per-pixel SPECTRUM be served from the same in-memory index (no slow re-read). */
+let activeIonCacheSiToPix: Map<number, number> | null = null;
 /** Set when the dataset exceeds the cache budget — fall back to per-render streaming. */
 let ionCacheTooBig = false;
 /**
- * Memory budget for the in-memory ion-image index. Per point we store m/z (f32, 4 B)
- * + pixel (u16 when the grid ≤ 65 535 cells, else i32) + intensity (f32, 4 B) ≈ 10 B.
- * Datasets whose point count exceeds this budget stream per render instead
- * (correctness identical, just not cached).
+ * Memory budget for the in-memory index. Per point we store m/z (f64, 8 B — exact,
+ * so spectra served from the index match the file) + pixel (u16 when the grid
+ * ≤ 65 535 cells, else i32) + intensity (f32, 4 B) ≈ 14 B. Datasets whose point
+ * count exceeds this budget stream per render instead (correctness identical).
  */
-const MAX_CACHE_BYTES = 900_000_000; // ~900 MB → ~90M points at 10 B/point
+const MAX_CACHE_BYTES = 900_000_000; // ~900 MB → ~64M points at 14 B/point
 // Bumped on every runFastLoad. Async background work (the deferred buildGridFast
 // loadResult) captures the value at start and refuses to post once superseded by
 // a newer load, so a slow background grid can't bleed into a freshly opened file
@@ -697,7 +700,7 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   // otherwise fall back to i32. Per-point bytes = 4 (m/z) + (2|4) (pixel) + 4 (int).
   const nPix = activeGrid.width * activeGrid.height;
   const useU16 = nPix <= 0xffff;
-  const bytesPerPoint = 4 + (useU16 ? 2 : 4) + 4;
+  const bytesPerPoint = 8 + (useU16 ? 2 : 4) + 4;
   if (nPoints * bytesPerPoint > MAX_CACHE_BYTES) {
     ionCacheTooBig = true;
     return false;
@@ -707,7 +710,7 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   const siToPix = new Map<number, number>();
   for (const [gridKey, si] of activeGrid.coordToSpectrumIndex) siToPix.set(si, gridKey);
 
-  const mzChunks: Float32Array[] = [];
+  const mzChunks: Float64Array[] = [];
   const pixChunks: (Uint16Array | Int32Array)[] = [];
   const inChunks: Float32Array[] = [];
   let total = 0;
@@ -719,7 +722,7 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
     const siArr = v.si.toArray() as ArrayLike<number | bigint>;
     const inArr = v.inten.toArray() as ArrayLike<number>;
     const n = mzArr.length;
-    const mzC = new Float32Array(n);
+    const mzC = new Float64Array(n);
     const pixC = useU16 ? new Uint16Array(n) : new Int32Array(n);
     const inC = new Float32Array(n);
     let k = 0;
@@ -742,7 +745,7 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   if (!ok) return false;
 
   // Concatenate the per-row-group chunks into the flat index arrays.
-  const mz = new Float32Array(total);
+  const mz = new Float64Array(total);
   const pix = useU16 ? new Uint16Array(total) : new Int32Array(total);
   const inten = new Float32Array(total);
   let off = 0;
@@ -754,12 +757,43 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
     off += len;
     // Release each source chunk as it's consumed so peak memory stays near the
     // final index size (one extra chunk) rather than ~2× it.
-    mzChunks[i] = undefined as unknown as Float32Array;
+    mzChunks[i] = undefined as unknown as Float64Array;
     pixChunks[i] = undefined as unknown as Uint16Array;
     inChunks[i] = undefined as unknown as Float32Array;
   }
   activeIonCache = { mz, pix, inten };
+  activeIonCacheSiToPix = siToPix; // enables instant per-pixel spectra
   send({ type: "ionIndexReady", points: total });
+  return true;
+}
+
+/**
+ * Serve one pixel's spectrum directly from the in-memory index — exact m/z (f64),
+ * no network, no Parquet decode. Returns false if the index isn't built or the
+ * spectrum_index isn't on the grid (caller falls back to readFastSpectrum).
+ */
+function spectrumFromCache(index: number, selectId: number): boolean {
+  if (!activeIonCache || !activeIonCacheSiToPix) return false;
+  const pixel = activeIonCacheSiToPix.get(index);
+  if (pixel === undefined) return false;
+
+  const { mz, pix, inten } = activeIonCache;
+  // Collect this pixel's points, then sort by m/z for the plot.
+  const idxs: number[] = [];
+  for (let i = 0; i < pix.length; i++) if (pix[i] === pixel) idxs.push(i);
+  if (idxs.length === 0) return false;
+  idxs.sort((a, b) => mz[a] - mz[b]);
+
+  const mzArr = new Float64Array(idxs.length);
+  const intArr = new Float32Array(idxs.length);
+  for (let k = 0; k < idxs.length; k++) {
+    mzArr[k] = mz[idxs[k]];
+    intArr[k] = inten[idxs[k]];
+  }
+  sendTransfer(
+    { type: "spectrumResult", spectrum: { index, id: `scan=${index + 1}`, mz: mzArr, intensity: intArr }, selectId },
+    [mzArr.buffer, intArr.buffer],
+  );
   return true;
 }
 
@@ -1238,6 +1272,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeStats = null;
         activeGrid = null;
         activeIonCache = null;
+        activeIonCacheSiToPix = null;
         ionCacheTooBig = false;
 
         // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
@@ -1266,6 +1301,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeStats = null;
         activeGrid = null;
         activeIonCache = null;
+        activeIonCacheSiToPix = null;
         ionCacheTooBig = false;
         activeSourceUrl = null; // local/in-memory — independent connections N/A
 
@@ -1344,6 +1380,11 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
 
       case "selectSpectrum": {
+        // Instant path: once the in-memory index exists, serve the pixel's
+        // spectrum from it (no network re-read — critical for remote files where
+        // a single row-group read is ~tens of seconds over a throttled link).
+        if (spectrumFromCache(msg.index, msg.selectId)) break;
+
         if (!activeReader) {
           // Fast path: read from spectra_data.parquet using row-group skipping.
           // ~12 MB per spectrum vs 553 MB for full reader init. Works immediately

@@ -64,6 +64,9 @@ type State = {
   ionIndexReady: boolean;
   /** Number of points held in the in-memory ion-image index (null until built). */
   ionIndexPoints: number | null;
+  /** True while a pixel/index spectrum read is in flight (instant from the index;
+   *  up to ~tens of seconds on a cold remote read). Drives a loading hint. */
+  spectrumLoading: boolean;
   /** BL-01: TIC normalization — divide each pixel's intensity by its TIC value. */
   ticNorm: boolean;
   /** BL-04: Gaussian smooth sigma in pixels (0 = disabled). */
@@ -209,6 +212,7 @@ const initialState: State = {
   renderProgress: null,
   ionIndexReady: false,
   ionIndexPoints: null,
+  spectrumLoading: false,
   // BL defaults (persisted).
   ticNorm: persisted.ticNorm,
   smoothSigma: persisted.smoothSigma,
@@ -330,7 +334,7 @@ export const useStore = create<State & Actions>((set) => ({
     // The Worker holds the active Reader; it performs the Parquet read. selectId
     // lets the result handler drop superseded responses (Codex r4-#3).
     const sid = ++currentSelectId;
-    set({ selectedIndex: index });
+    set({ selectedIndex: index, spectrumLoading: true });
     worker.postMessage({ type: "selectSpectrum", index, selectId: sid } satisfies WorkerRequest);
   },
 
@@ -550,6 +554,7 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       useStore.setState({
         selectedIndex: msg.spectrum.index,
         selectedSpectrum: msg.spectrum,
+        spectrumLoading: false,
       });
       break;
 

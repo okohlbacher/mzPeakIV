@@ -33,6 +33,7 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
   const renderIonImage = useStore((s) => s.renderIonImage);
   const peakDeltaMass = useStore((s) => s.peakDeltaMass);
   const roiIndices = useStore((s) => s.roiIndices);
+  const spectrumLoading = useStore((s) => s.spectrumLoading);
 
   // BL-03: whether the user has explicitly dismissed the mean spectrum display
   const [showMean, setShowMean] = useState(false);
@@ -291,12 +292,17 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
       <div className="dock__head">
         <span className="dock__title">{heading}</span>
 
-        {activeSpectrum && (
+        {spectrumLoading && (
+          <span className="dock__meta" data-testid="spectrum-loading" style={{ color: "var(--text-faint)" }}>
+            Loading spectrum…
+          </span>
+        )}
+        {!spectrumLoading && activeSpectrum && (
           <span className="dock__meta">
             {activeSpectrum.mz.length.toLocaleString()} pts · {activeSpectrum.id}
           </span>
         )}
-        {!activeSpectrum && numSpectra > 0 && (
+        {!spectrumLoading && !activeSpectrum && numSpectra > 0 && (
           <span className="dock__meta" style={{ color: "var(--text-faint)" }}>
             click a pixel or enter an index
           </span>
