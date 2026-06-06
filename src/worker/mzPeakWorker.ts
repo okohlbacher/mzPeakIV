@@ -561,6 +561,50 @@ async function initReaderAndGrid(): Promise<boolean> {
  *
  * Total data read: 208 KB (vs 553 MB for full reader init). ~10-30× faster.
  */
+/** How many independent reader handles overlap row-group fetches (network-bound). */
+const RG_CONCURRENCY = 4;
+
+/**
+ * Stream every row group of spectra_data.parquet, invoking `onTable` for each.
+ *
+ * The remote read is network-bound, and reading row groups serially leaves the
+ * link idle between fetches. We open several INDEPENDENT ParquetFile handles and
+ * stripe the row groups across them, so up to RG_CONCURRENCY fetches are in flight
+ * at once. JS is single-threaded, so the wasm decode + your synchronous `onTable`
+ * accumulation never actually overlap — only the network fetches do — which keeps
+ * shared-accumulator updates race-free. Posts renderProgress per processed group.
+ *
+ * @returns false when the data file can't be opened.
+ */
+async function forEachSpectraRowGroup(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onTable: (table: any) => void,
+  requestId?: number,
+): Promise<boolean> {
+  const probe = await openSpectraDataParquet();
+  if (!probe) return false;
+  const nRG = probe.metadata().numRowGroups();
+  const conc = Math.max(1, Math.min(RG_CONCURRENCY, nRG));
+  const extra = await Promise.all(
+    Array.from({ length: conc - 1 }, () => openSpectraDataParquet()),
+  );
+  const handles = [probe, ...extra].filter((p): p is NonNullable<typeof probe> => !!p);
+
+  let done = 0;
+  await Promise.all(
+    handles.map(async (pf, w) => {
+      for (let rg = w; rg < nRG; rg += handles.length) {
+        const table = tableFromIPC((await pf.read({ rowGroups: [rg] })).intoIPCStream());
+        onTable(table); // synchronous → race-free against the other handles
+        done++;
+        if (requestId !== undefined)
+          send({ type: "renderProgress", requestId, done, total: nRG });
+      }
+    }),
+  );
+  return true;
+}
+
 async function computeIonImageFast(
   mzStart: number,
   mzEnd: number,
@@ -568,37 +612,27 @@ async function computeIonImageFast(
 ): Promise<Float32Array | null> {
   if (!activeZipStorage || !activeGrid) return null;
 
-  const pf = await openSpectraDataParquet();
-  if (!pf) return null;
-  const nRG = pf.metadata().numRowGroups();
-
   // Accumulate intensity sums per spectrum_index across all row groups.
   // Use a Map for sparse accumulation (most spectra may have 0 signal in range).
   const intensitySum = new Map<number, number>();
 
-  for (let rg = 0; rg < nRG; rg++) {
-    const rawTable = await pf.read({ rowGroups: [rg] });
-    const table = tableFromIPC(rawTable.intoIPCStream());
-
+  const ok = await forEachSpectraRowGroup((table) => {
     const v = pointVecs(table);
-    if (v) {
-      // Vectorized: pull the whole row group's columns as typed arrays and index
-      // them directly. Per-element vec.get(r) over millions of points was the
-      // dominant render cost; toArray() indexing is ~orders of magnitude faster.
-      const mzArr = v.mz.toArray() as ArrayLike<number>;
-      const siArr = v.si.toArray() as ArrayLike<number | bigint>;
-      const inArr = v.inten.toArray() as ArrayLike<number>;
-      const nRows = table.numRows;
-      for (let r = 0; r < nRows; r++) {
-        const mz = mzArr[r] as number;
-        if (mz < mzStart || mz > mzEnd) continue;
-        const si = Number(siArr[r]);
-        intensitySum.set(si, (intensitySum.get(si) ?? 0) + (inArr[r] as number));
-      }
+    if (!v) return;
+    // Vectorized: pull each column as a typed array and index it directly —
+    // per-element vec.get(r) over millions of points was the CPU bottleneck.
+    const mzArr = v.mz.toArray() as ArrayLike<number>;
+    const siArr = v.si.toArray() as ArrayLike<number | bigint>;
+    const inArr = v.inten.toArray() as ArrayLike<number>;
+    const nRows = mzArr.length;
+    for (let r = 0; r < nRows; r++) {
+      const mz = mzArr[r] as number;
+      if (mz < mzStart || mz > mzEnd) continue;
+      const si = Number(siArr[r]);
+      intensitySum.set(si, (intensitySum.get(si) ?? 0) + (inArr[r] as number));
     }
-    if (requestId !== undefined)
-      send({ type: "renderProgress", requestId, done: rg + 1, total: nRG });
-  }
+  }, requestId);
+  if (!ok) return null;
 
   // coordToSpectrumIndex maps gridKey → spectrumIndex.
   // We have intensitySum keyed by spectrumIndex → map into grid image.
@@ -627,42 +661,34 @@ async function computeMultiIonImagesFast(
   const nullResult = () => windows.map(() => null);
   if (!activeZipStorage || !activeGrid) return nullResult();
 
-  const pf = await openSpectraDataParquet();
-  if (!pf) return nullResult();
-  const nRG = pf.metadata().numRowGroups();
-
   // One sparse accumulator per non-null window.
   const sums = windows.map((w) => (w ? new Map<number, number>() : null));
 
-  for (let rg = 0; rg < nRG; rg++) {
-    const rawTable = await pf.read({ rowGroups: [rg] });
-    const table = tableFromIPC(rawTable.intoIPCStream());
+  const ok = await forEachSpectraRowGroup((table) => {
     const v = pointVecs(table);
-    if (v) {
-      // Vectorized typed-array access (see computeIonImageFast).
-      const mzArr = v.mz.toArray() as ArrayLike<number>;
-      const siArr = v.si.toArray() as ArrayLike<number | bigint>;
-      const inArr = v.inten.toArray() as ArrayLike<number>;
-      const nRows = table.numRows;
-      for (let r = 0; r < nRows; r++) {
-        const mz = mzArr[r] as number;
-        let si = -1;
-        let inten = 0;
-        for (let c = 0; c < windows.length; c++) {
-          const w = windows[c];
-          if (!w || mz < w.start || mz > w.end) continue;
-          if (si < 0) {
-            si = Number(siArr[r]); // resolve once, only if a window matched
-            inten = inArr[r] as number;
-          }
-          const m = sums[c]!;
-          m.set(si, (m.get(si) ?? 0) + inten);
+    if (!v) return;
+    // Vectorized typed-array access (see computeIonImageFast).
+    const mzArr = v.mz.toArray() as ArrayLike<number>;
+    const siArr = v.si.toArray() as ArrayLike<number | bigint>;
+    const inArr = v.inten.toArray() as ArrayLike<number>;
+    const nRows = mzArr.length;
+    for (let r = 0; r < nRows; r++) {
+      const mz = mzArr[r] as number;
+      let si = -1;
+      let inten = 0;
+      for (let c = 0; c < windows.length; c++) {
+        const w = windows[c];
+        if (!w || mz < w.start || mz > w.end) continue;
+        if (si < 0) {
+          si = Number(siArr[r]); // resolve once, only if a window matched
+          inten = inArr[r] as number;
         }
+        const m = sums[c]!;
+        m.set(si, (m.get(si) ?? 0) + inten);
       }
     }
-    if (requestId !== undefined)
-      send({ type: "renderProgress", requestId, done: rg + 1, total: nRG });
-  }
+  }, requestId);
+  if (!ok) return nullResult();
 
   const grid = activeGrid;
   return windows.map((w, c) => {
