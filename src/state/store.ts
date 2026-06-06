@@ -76,6 +76,9 @@ type State = {
   opticalErrors: Record<string, string>;
   /** ADD-01: the optical image currently shown (archive_path), or null. */
   selectedOpticalPath: string | null;
+  /** Live zoom factor of the active image view (1 = fit), surfaced to the status
+   *  bar. Published by ImagingPanel; reset to 1 on view change. */
+  viewZoom: number;
 };
 
 type Actions = {
@@ -203,6 +206,7 @@ const initialState: State = {
   opticalDecoded: {},
   opticalErrors: {},
   selectedOpticalPath: null,
+  viewZoom: 1,
 };
 
 // ---------------------------------------------------------------------------

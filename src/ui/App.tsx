@@ -34,6 +34,7 @@ export function App() {
   const isImaging = useStore((s) => s.capabilities?.isImaging ?? false);
   const grid = useStore((s) => s.grid);
   const stats = useStore((s) => s.stats);
+  const viewZoom = useStore((s) => s.viewZoom);
 
   const loading =
     stage === "zip-index" ||
@@ -134,7 +135,7 @@ export function App() {
                 </Badge>
               </div>
               <SampleRunPanel />
-              <StatsPanel />
+              <StatsPanel defaultOpen />
               <OpticalPanel />
               <SettingsView />
               <FormatDetailsPanel />
@@ -194,6 +195,12 @@ export function App() {
           </span>
           <span>{STAGE_LABEL[stage]}</span>
           <span className="statusbar__spacer" />
+          {(() => {
+            // Acquisition mode (dominant profile/centroid) — handoff §7 status bar.
+            const r = stats?.representationCounts;
+            if (!r || (r.profile === 0 && r.centroid === 0)) return null;
+            return <span>{r.profile >= r.centroid ? "profile" : "centroid"}</span>;
+          })()}
           {grid && (
             <span>
               {grid.width} × {grid.height} px
@@ -205,6 +212,7 @@ export function App() {
               {grid.totalCells.toLocaleString()} spectra
             </span>
           )}
+          {grid && <span>{Math.round(viewZoom * 100)}% zoom</span>}
         </footer>
       </div>
 

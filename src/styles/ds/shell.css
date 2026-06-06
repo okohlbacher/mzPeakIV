@@ -100,8 +100,16 @@
   background-size: 22px 22px;
 }
 .stage__empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
   color: var(--text-faint); font-size: var(--text-sm);
   font-family: var(--font-mono); text-align: center; max-width: 40ch;
+}
+/* Brand device (OpenMS stick-spectrum) as a faint watermark above empty-state
+   copy — reuse the mass-spectrum motif for empty states (handoff §1/§9). */
+.stage__empty::before {
+  content: ""; width: 56px; height: 38px; opacity: 0.4;
+  background: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 32' fill='none' stroke='%239aa4ad' stroke-width='2' stroke-linecap='round'%3E%3Cline x1='4' y1='28' x2='44' y2='28'/%3E%3Cline x1='8' y1='28' x2='8' y2='16'/%3E%3Cline x1='14' y1='28' x2='14' y2='6'/%3E%3Cline x1='20' y1='28' x2='20' y2='20'/%3E%3Cline x1='26' y1='28' x2='26' y2='10'/%3E%3Cline x1='32' y1='28' x2='32' y2='22'/%3E%3Cline x1='38' y1='28' x2='38' y2='14'/%3E%3C/svg%3E");
 }
 .imgframe { position: relative; margin: auto; flex: 0 0 auto; box-shadow: 0 8px 30px rgba(0,0,0,0.45); border-radius: 2px; max-width: 100%; max-height: 100%; }
 /* When the stage is scrollable (zoomed in), let the frame exceed the viewport. */

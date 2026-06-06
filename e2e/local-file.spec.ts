@@ -173,9 +173,8 @@ test("m/z range shows 'not available' or a numeric range — never blank (R-02d)
     { timeout: 30000 },
   );
 
-  // The "MS Image" panel is collapsed by default (UAT-r3) — expand it.
-  await page.getByRole("button", { name: /MS Image/i }).click();
-
+  // The "MS Image" panel is open by default (design-handoff-v2 sync), so its
+  // rows are visible without expanding.
   const mzRangeCell = page.getByTestId("stat-mz-range");
   await expect(mzRangeCell).toBeVisible();
 

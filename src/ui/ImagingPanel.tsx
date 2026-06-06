@@ -477,6 +477,11 @@ export function ImagingPanel({
     }
   }, [view]);
 
+  // Publish the live zoom to the shell status bar (mode · dimensions · counts · zoom).
+  useEffect(() => {
+    useStore.setState({ viewZoom: zoom });
+  }, [zoom]);
+
   // Guard: the Optical tab only exists when the file has optical images. If the
   // active view is "optical" but they're absent (e.g. a new file loaded while on
   // that tab), fall back to Overview so the centre pane isn't stuck (Codex r3-#1).
