@@ -7,7 +7,7 @@ import { useStore } from "../state/store";
 // support, and CORS allowing this origin (GET + Range; expose Content-Range /
 // Accept-Ranges). Nothing is uploaded — the file is fetched into the browser.
 const DEFAULT_DEMO_URL =
-  "https://object.storage.eu01.onstackit.cloud/mzpeak-demo/demo/PXD001283-HR2MSI-urinary-bladder.mzpeak";
+  "https://object.storage.eu01.onstackit.cloud/v09/demo/PXD001283-HR2MSI-urinary-bladder_HR2MSImouseurinarybladderS096.mzpeak";
 
 interface Props {
   /** Whether a load is already in progress (disables inputs). */

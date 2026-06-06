@@ -232,6 +232,44 @@ to reflect the chosen value.
 
 ---
 
+## Infrastructure & loading
+
+### BL-S3 · Load datasets from `s3://` URLs
+
+**What**: Accept an `s3://bucket/key` URL in the loader and stream it via HTTP Range,
+the same way the current `https://…` path does.
+
+**Why**: Demo/source datasets are addressed as `s3://` (e.g.
+`s3://v09/demo/PXD001283-HR2MSI-urinary-bladder_HR2MSImouseurinarybladderS096.mzpeak`).
+A browser's `fetch()` only speaks `http(s)://`, so an `s3://` URL cannot be loaded
+client-side as-is — today it must be rewritten to the provider's HTTPS endpoint
+(`https://object.storage.eu01.onstackit.cloud/v09/demo/…`).
+
+**Implementation notes**:
+- Map `s3://<bucket>/<key>` → the configured S3 HTTPS endpoint
+  (`https://<endpoint>/<bucket>/<key>`) before handing the URL to the reader. A small
+  endpoint setting (default the StackIT `object.storage.eu01.onstackit.cloud` host)
+  would cover the common case.
+- Anonymous (public-read) objects only — keep the client-side, no-credentials posture;
+  presigned URLs are already plain HTTPS and work today. Do **not** add AWS-SDK signing
+  / credentials to the browser app.
+- Still requires the target bucket to allow byte-range + CORS (see BL-CORS).
+
+### BL-CORS · Demo-bucket CORS / public-read (ops, not app code)
+
+**What**: The default demo object must be browser-loadable. As of this writing
+`https://object.storage.eu01.onstackit.cloud/v09/demo/PXD001283-…S096.mzpeak` is
+**public-read and supports byte ranges (206 + `Accept-Ranges`)**, but the bucket has
+**no CORS configuration** — a cross-origin Range GET from the Pages origin is blocked
+(preflight `OPTIONS` → `403`, no `Access-Control-*` headers).
+
+**Action (bucket policy, not app code)**: add a CORS rule allowing the app origin
+`https://okohlbacher.github.io` — method `GET`, allowed request header `Range`, and
+expose `Content-Range` / `Accept-Ranges`. Until then the default "Load URL" demo fails
+with a CORS error; local files and any CORS-enabled URL work regardless.
+
+---
+
 ## Explicitly out of scope
 
 The following Cardinal features were reviewed and excluded from this backlog on the
