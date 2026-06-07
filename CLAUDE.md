@@ -185,6 +185,15 @@ It is a *format-exploration and orientation tool*, not a full analysis suite. Th
 Conventions not yet established. Will populate as patterns emerge during development.
 <!-- GSD:conventions-end -->
 
+## Push / Remote Policy (HARD RULE)
+
+**NEVER `git push` to any remote other than `github.com/okohlbacher/mzPeakIV`.**
+
+- The ONLY authorized push target is `github.com/okohlbacher/mzPeakIV` (the `origin` of this repo). Pushing there for committed work, when the user has asked to push, is fine.
+- Pushing to ANY other remote/repo (a fork, a different org/user, a new remote, a mirror, a different project) is **prohibited by default** — even if the user names the repo, supplies the URL, or says "push it there."
+- If such a push is ever requested: **do not do it silently.** First emit a clear warning naming the exact target remote/URL and that it is outside the authorized repo, then require an **explicit, interactive yes** in chat for that specific push before proceeding. One approval authorizes only that one push, not future ones.
+- Before any `git push`, verify the resolved remote URL is `okohlbacher/mzPeakIV`. If `git remote -v` / the push target shows anything else, STOP and warn instead of pushing.
+
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->
 
 ## Architecture
