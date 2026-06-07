@@ -1546,6 +1546,16 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
             | undefined;
           if (!entry || entry.directory || typeof entry.getData !== "function")
             throw new Error(`ZIP member not found: ${archivePath}`);
+          // Background preload: only decode members at/under the preload cap (and
+          // whose size is known). Anything bigger/unknown is skipped — NOT an error;
+          // it stays decodable on demand. A user request omits preloadMaxBytes.
+          if (typeof msg.preloadMaxBytes === "number") {
+            const known = typeof entry.uncompressedSize === "number";
+            if (!known || (entry.uncompressedSize as number) > msg.preloadMaxBytes) {
+              send({ type: "opticalImageSkipped", archivePath, gen });
+              break;
+            }
+          }
           // Defense-in-depth: reject an oversized member BEFORE inflating it, so
           // a hostile index can't name a huge member and exhaust memory.
           if (typeof entry.uncompressedSize === "number" && entry.uncompressedSize > MAX_OPTICAL_BYTES)

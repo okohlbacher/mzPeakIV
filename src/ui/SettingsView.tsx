@@ -154,8 +154,9 @@ export function SettingsView({ defaultOpen = false }: { defaultOpen?: boolean })
         </div>
         <p className="settings-card__hint">
           When on, the full spectra index is buffered in memory in the background
-          after the overview loads, so pixel spectra and ion images are instant.
-          Cache limit caps that buffer — <strong>0 = automatic</strong> (scaled to
+          after the overview loads (so pixel spectra and ion images are instant),
+          and small optical images (&lt; 50 MB) are decoded ahead of time. Cache
+          limit caps the spectra buffer — <strong>0 = automatic</strong> (scaled to
           your device's memory). A new limit applies to the next file load. Preset
           via URL: <code>?preload=0</code>, <code>?cache=512</code>.
         </p>

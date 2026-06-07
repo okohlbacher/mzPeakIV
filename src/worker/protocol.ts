@@ -54,7 +54,11 @@ export type WorkerRequest =
   // ADD-01: lazily decode an embedded optical TIFF (ZIP member) to RGBA. `gen`
   // is the load generation (echoed back) so results from a previous file are
   // dropped rather than cached into the newly-loaded file.
-  | { type: "getOpticalImage"; archivePath: string; gen: number }
+  // preloadMaxBytes (optional): when set, this is a BACKGROUND preload — the worker
+  // decodes only if the member's stored size ≤ this cap, else replies
+  // opticalImageSkipped (a user-initiated request omits it and decodes up to the
+  // hard MAX_OPTICAL_BYTES cap).
+  | { type: "getOpticalImage"; archivePath: string; gen: number; preloadMaxBytes?: number }
   // Caching policy from the UI/URL: whether to preload the index in the background,
   // and a hard cache size limit in bytes (0 = automatic / device-aware).
   | { type: "setCacheConfig"; preloadEnabled: boolean; cacheLimitBytes: number };
@@ -110,6 +114,9 @@ export type WorkerResponse =
   // `gen` echoes the request's load generation for stale-result rejection.
   | { type: "opticalImageResult"; archivePath: string; gen: number; width: number; height: number; rgba: Uint8ClampedArray }
   | { type: "opticalImageError"; archivePath: string; gen: number; message: string }
+  // A background preload was skipped because the member exceeds the preload cap
+  // (or its size is unknown). NOT an error — the image is still decodable on demand.
+  | { type: "opticalImageSkipped"; archivePath: string; gen: number }
   | {
       type: "error";
       class: ReaderErrorClass;

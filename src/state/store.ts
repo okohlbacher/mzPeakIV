@@ -306,6 +306,29 @@ function postLoadWhenReady(send: () => void): void {
   else pendingLoad = send; // keep only the latest pending load
 }
 
+/** Optical images at/under this stored size are decoded in the background after
+ *  load (subject to the global preload setting) so the Optical tab is instant. */
+const OPTICAL_PRELOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Background-decode every available optical image below the size cap (gated by the
+ *  global preload setting). Idempotent — already-decoded / in-flight / errored
+ *  members are skipped, so it's safe to call on each loadResult. */
+function preloadOpticalImages(): void {
+  const s = useStore.getState();
+  if (!s.preloadEnabled) return;
+  for (const im of s.opticalImages) {
+    const p = im.archivePath;
+    if (s.opticalDecoded[p] || s.opticalErrors[p] || opticalInFlight.has(p)) continue;
+    opticalInFlight.add(p);
+    worker.postMessage({
+      type: "getOpticalImage",
+      archivePath: p,
+      gen: currentLoadGen,
+      preloadMaxBytes: OPTICAL_PRELOAD_MAX_BYTES,
+    } satisfies WorkerRequest);
+  }
+}
+
 /** Push the current caching policy to the worker. No-op until the worker is ready
  *  (the `ready` handler sends the then-current config, incl. any URL/settings
  *  overrides applied before init), so this is always eventually consistent. */
@@ -557,6 +580,9 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
         selectedIndex: prev.selectedIndex,
         selectedSpectrum: prev.selectedSpectrum,
       });
+      // Background-decode optical images below the size cap so the Optical tab is
+      // instant when the user gets to it (idempotent; respects the preload setting).
+      preloadOpticalImages();
       break;
     }
 
@@ -667,6 +693,23 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       useStore.setState({
         opticalErrors: { ...prevOptE.opticalErrors, [msg.archivePath]: msg.message },
       });
+      break;
+    }
+
+    case "opticalImageSkipped": {
+      // A background preload skipped this member (too big / unknown size). NOT an
+      // error — clear in-flight and, if the user is already viewing it, decode it
+      // fully on demand (no preload cap) so their selection still resolves.
+      if (msg.gen !== currentLoadGen) break;
+      opticalInFlight.delete(msg.archivePath);
+      const stOpt = useStore.getState();
+      if (
+        stOpt.selectedOpticalPath === msg.archivePath &&
+        !stOpt.opticalDecoded[msg.archivePath] &&
+        !stOpt.opticalErrors[msg.archivePath]
+      ) {
+        stOpt.requestOpticalImage(msg.archivePath);
+      }
       break;
     }
 

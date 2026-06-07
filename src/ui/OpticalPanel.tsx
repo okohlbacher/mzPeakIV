@@ -12,6 +12,7 @@ export function OpticalPanel({ defaultOpen = false }: { defaultOpen?: boolean })
   const opticalImages = useStore((s) => s.opticalImages);
   const selectedOpticalPath = useStore((s) => s.selectedOpticalPath);
   const setSelectedOpticalPath = useStore((s) => s.setSelectedOpticalPath);
+  const opticalDecoded = useStore((s) => s.opticalDecoded);
 
   if (!opticalImages || opticalImages.length === 0) return null;
 
@@ -25,11 +26,13 @@ export function OpticalPanel({ defaultOpen = false }: { defaultOpen?: boolean })
       <div data-testid="optical-list">
         {opticalImages.map((im) => {
           const selected = im.archivePath === selectedOpticalPath;
+          const decoded = !!opticalDecoded[im.archivePath];
           return (
             <button
               key={im.archivePath}
               type="button"
               data-testid="optical-list-item"
+              data-decoded={decoded || undefined}
               aria-pressed={selected}
               onClick={() => setSelectedOpticalPath(im.archivePath)}
               className={`optical-item${selected ? " optical-item--active" : ""}`}
@@ -38,6 +41,11 @@ export function OpticalPanel({ defaultOpen = false }: { defaultOpen?: boolean })
                 <span className="optical-item__name" title={im.sourceName}>
                   {im.sourceName}
                 </span>
+                {decoded && (
+                  <Badge tone="success" dot>
+                    ready
+                  </Badge>
+                )}
                 <Badge tone={im.role === "optical" ? "info" : "neutral"}>{im.role}</Badge>
               </div>
               <StatRow
