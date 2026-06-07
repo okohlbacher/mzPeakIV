@@ -41,6 +41,10 @@ type State = {
   tic: Float32Array | null;
   /** Total .mzpeak size in bytes (zip reader size); null until known. */
   fileSize: number | null;
+  /** Original URL the current file was opened from (null for local files). Drives
+   *  the deep-link "Copy link" button; kept as the user-supplied form (e.g. an
+   *  `s3://` link stays `s3://`) so a copied link round-trips through resolveLoadUrl. */
+  sourceUrl: string | null;
   /** D-08 named warning: set only when a file mixes profile + centroid spectra. */
   mixedRepresentationWarning: string | null;
   stage: LoadStage;
@@ -194,6 +198,7 @@ const initialState: State = {
   grid: null,
   tic: null,
   fileSize: null,
+  sourceUrl: null,
   mixedRepresentationWarning: null,
   stage: "idle",
   error: null,
@@ -291,7 +296,8 @@ export const useStore = create<State & Actions>((set) => ({
     currentSelectId++;
     opticalInFlight.clear();
     // Reset file state but PRESERVE the user's global settings across loads.
-    set({ ...initialState, ...settingsSlice(), stage: "zip-index" });
+    // Record the ORIGINAL url (not `resolved`) so a copied deep link round-trips.
+    set({ ...initialState, ...settingsSlice(), stage: "zip-index", sourceUrl: url });
     postLoadWhenReady(() =>
       worker.postMessage({ type: "loadUrl", url: resolved } satisfies WorkerRequest),
     );

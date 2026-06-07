@@ -69,6 +69,22 @@ instantly (the pre-filled default); the full **PXD001283 HR2MSI** imaging datase
 or `s3://bucket/key` (an `s3://` address is rewritten to the storage HTTPS endpoint;
 anonymous public-read only — no in-browser credentials).
 
+### Deep links — open a file directly by URL
+Append a `?file=` query parameter to open an external `.mzpeak` immediately, with no
+clicks — handy for links emitted by the converter or embedded in another page:
+
+```
+https://okohlbacher.github.io/mzPeakIV/?file=<percent-encoded URL to a .mzpeak>
+```
+
+`?url=` is accepted as an alias; the value may be an `http(s)://` or `s3://` URL
+(other schemes are rejected). The file is read over HTTP Range requests, so it
+starts in seconds rather than after a full download. Once a file is open from a URL,
+the header shows a **Copy link** button that builds such a link for the current
+file. The hosted object must allow Range requests and CORS for the viewer origin
+(see [Hosting the demo dataset](#hosting-the-demo-dataset)); a deep link to a host
+without those shows a clear error and leaves the file picker available to recover.
+
 ### Run locally
 ```bash
 git clone https://github.com/okohlbacher/mzPeakIV

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { PanelLeft, FolderOpen, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { PanelLeft, FolderOpen, ShieldCheck, Link2, Check } from "lucide-react";
 
 import { useStore } from "../state/store";
 import { STAGE_LABEL } from "./stageLabels";
@@ -14,7 +14,7 @@ import { FormatDetailsPanel } from "./FormatDetailsPanel";
 import { SpectrumPanel } from "./SpectrumPanel";
 import { ImagingPanel } from "./ImagingPanel";
 import { SettingsView } from "./SettingsView";
-import { Badge } from "./ds";
+import { Badge, Button } from "./ds";
 import type { View } from "./viewTypes";
 
 const LOGO = `${import.meta.env.BASE_URL}openms-logo.png`;
@@ -36,6 +36,8 @@ export function App() {
   const grid = useStore((s) => s.grid);
   const stats = useStore((s) => s.stats);
   const viewZoom = useStore((s) => s.viewZoom);
+  const openUrl = useStore((s) => s.openUrl);
+  const sourceUrl = useStore((s) => s.sourceUrl);
 
   const loading =
     stage === "zip-index" ||
@@ -57,6 +59,7 @@ export function App() {
   const [railOpen, setRailOpen] = useState(false); // narrow-screen rail overlay
   const [reopen, setReopen] = useState(false); // "Open file" re-shows the loader
   const [view, setView] = useState<View>("overview");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const mq = window.matchMedia(WIDE_QUERY);
@@ -65,12 +68,39 @@ export function App() {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
+  // ── Deep link: ?file=<url> (alias ?url=) auto-opens an external .mzpeak ──────
+  // URLSearchParams.get() percent-decodes, so the value is a plain URL. Only
+  // http(s):// and s3:// are accepted (resolveLoadUrl maps s3:// → HTTPS); this
+  // blocks javascript:/data: URLs. The URL is only ever fetched + rendered as
+  // text, so there is no XSS surface from the param.
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current) return; // run once (StrictMode double-invoke safe)
+    deepLinkDone.current = true;
+    const p = new URLSearchParams(window.location.search);
+    const fileUrl = p.get("file") ?? p.get("url");
+    if (fileUrl && /^(https?|s3):\/\//i.test(fileUrl)) void openUrl(fileUrl);
+  }, [openUrl]);
+
+  // Build a shareable deep link to the currently-open URL-sourced file.
+  function copyDeepLink() {
+    if (!sourceUrl) return;
+    const link = `${location.origin}${location.pathname}?file=${encodeURIComponent(sourceUrl)}`;
+    void navigator.clipboard?.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+
   // Clear the "reopen" overlay once a fresh load actually starts.
   useEffect(() => {
     if (loading || ready || noImaging) setReopen(false);
   }, [loading, ready, noImaging]);
 
-  const showLoaderOverlay = stage === "idle" || reopen;
+  // Show the loader (file picker) on idle, on explicit "Open file", AND on error
+  // — so a bad/CORS-less deep link stays recoverable: the user can pick another
+  // file without a manual reload (the error is surfaced inside the loader card).
+  const showLoaderOverlay = stage === "idle" || reopen || isError;
   const railVisible = hasShell && (isWide || railOpen);
 
   return (
@@ -110,6 +140,18 @@ export function App() {
           )}
           <div className="topbar__spacer" />
           <div className="topbar__actions">
+            {hasShell && sourceUrl && (
+              <Button
+                variant="ghost"
+                size="sm"
+                iconLeft={copied ? <Check size={15} /> : <Link2 size={15} />}
+                onClick={copyDeepLink}
+                data-testid="copy-link"
+                title="Copy a shareable link that opens this file directly"
+              >
+                {copied ? "Copied" : "Copy link"}
+              </Button>
+            )}
             {(hasShell || isError) && (
               <button
                 className="iconbtn"
@@ -181,11 +223,6 @@ export function App() {
               </>
             )}
 
-            {isError && error && (
-              <div style={{ padding: "1rem", overflow: "auto" }}>
-                <ErrorBanner error={error} />
-              </div>
-            )}
           </div>
         </div>
 
@@ -229,6 +266,11 @@ export function App() {
               window, and inspect the spectrum behind any pixel — entirely in the
               browser.
             </div>
+            {isError && error && (
+              <div style={{ width: "100%" }}>
+                <ErrorBanner error={error} />
+              </div>
+            )}
             <FileLoader loading={loading} />
             {loading && <ProgressBar stage={stage} />}
             <p className="loader__note" data-testid="privacy-note">
