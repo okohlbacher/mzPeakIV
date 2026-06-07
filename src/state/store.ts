@@ -83,6 +83,11 @@ type State = {
   /** Global Δm/z (Da) applied when clicking a peak in the spectrum to render
    *  the ion image for that mass. Persisted in localStorage. */
   peakDeltaMass: number;
+  /** Caching policy (persisted; presettable via ?preload= / ?cache= URL params).
+   *  preloadEnabled: background-buffer the spectra index after the TIC overview.
+   *  cacheLimitMB: in-memory cache hard limit in MB (0 = automatic/device-aware). */
+  preloadEnabled: boolean;
+  cacheLimitMB: number;
   /** BL-02: Multi-channel overlay state (RGB overlay of three m/z windows). */
   multiChannel: MultiChannelState | null;
   /** BL-03: Mean spectrum across all (or sampled) pixels. */
@@ -115,6 +120,9 @@ type Actions = {
   setHistogramMode: (mode: HistogramMode) => void;
   /** Set the global peak-click Δm/z (Da); persisted to localStorage. */
   setPeakDeltaMass: (delta: number) => void;
+  /** Caching policy setters (persisted + pushed to the worker). */
+  setPreloadEnabled: (enabled: boolean) => void;
+  setCacheLimitMB: (mb: number) => void;
   // BL-02: multi-channel overlay.
   renderMultiChannel: (channels: (ChannelRequest | null)[]) => void;
   // BL-03: mean spectrum across all pixels.
@@ -144,6 +152,10 @@ type PersistedSettings = {
   smoothSigma: number;
   histogramMode: HistogramMode;
   peakDeltaMass: number;
+  /** Background-preload the in-memory spectra index after the TIC overview. */
+  preloadEnabled: boolean;
+  /** In-memory cache hard limit in MB; 0 = automatic (device-aware). */
+  cacheLimitMB: number;
 };
 
 const SETTINGS_DEFAULTS: PersistedSettings = {
@@ -154,6 +166,8 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   smoothSigma: 0,
   histogramMode: "none",
   peakDeltaMass: 0.3,
+  preloadEnabled: true,
+  cacheLimitMB: 0,
 };
 
 function loadSettings(): PersistedSettings {
@@ -178,6 +192,8 @@ function settingsSlice(): PersistedSettings {
     smoothSigma: s.smoothSigma,
     histogramMode: s.histogramMode,
     peakDeltaMass: s.peakDeltaMass,
+    preloadEnabled: s.preloadEnabled,
+    cacheLimitMB: s.cacheLimitMB,
   };
 }
 
@@ -227,6 +243,8 @@ const initialState: State = {
   smoothSigma: persisted.smoothSigma,
   histogramMode: persisted.histogramMode,
   peakDeltaMass: persisted.peakDeltaMass,
+  preloadEnabled: persisted.preloadEnabled,
+  cacheLimitMB: persisted.cacheLimitMB,
   multiChannel: null,
   meanSpectrum: null,
   roiIndices: null,
@@ -286,6 +304,19 @@ let pendingLoad: (() => void) | null = null;
 function postLoadWhenReady(send: () => void): void {
   if (workerReady) send();
   else pendingLoad = send; // keep only the latest pending load
+}
+
+/** Push the current caching policy to the worker. No-op until the worker is ready
+ *  (the `ready` handler sends the then-current config, incl. any URL/settings
+ *  overrides applied before init), so this is always eventually consistent. */
+function sendCacheConfig(): void {
+  if (!workerReady) return;
+  const s = useStore.getState();
+  worker.postMessage({
+    type: "setCacheConfig",
+    preloadEnabled: s.preloadEnabled,
+    cacheLimitBytes: Math.max(0, Math.round(s.cacheLimitMB * 1_000_000)),
+  } satisfies WorkerRequest);
 }
 
 export const useStore = create<State & Actions>((set) => ({
@@ -403,6 +434,21 @@ export const useStore = create<State & Actions>((set) => ({
     persistSettings();
   },
 
+  // Caching policy — persisted + pushed to the worker (takes effect immediately
+  // where possible: enabling preload buffers the open file now; a new limit
+  // applies to the next index build).
+  setPreloadEnabled(enabled: boolean) {
+    set({ preloadEnabled: enabled });
+    persistSettings();
+    sendCacheConfig();
+  },
+  setCacheLimitMB(mb: number) {
+    const v = Number.isFinite(mb) && mb > 0 ? Math.floor(mb) : 0; // 0 = auto
+    set({ cacheLimitMB: v });
+    persistSettings();
+    sendCacheConfig();
+  },
+
   // BL-02: Render an RGB multi-channel overlay.
   renderMultiChannel(channels: (ChannelRequest | null)[]) {
     const validChannels = channels.filter((ch): ch is ChannelRequest => ch !== null);
@@ -467,6 +513,10 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
     case "ready": {
       // Worker's onmessage is registered — safe to deliver any buffered load.
       workerReady = true;
+      // Push the current caching policy (incl. URL/settings overrides applied
+      // before init) BEFORE replaying the buffered load, so the load's preload
+      // decision uses it.
+      sendCacheConfig();
       const load = pendingLoad;
       pendingLoad = null;
       load?.();
@@ -534,8 +584,13 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
     }
 
     case "ionIndexPreloading":
-      // Background buffer started (after the TIC overview).
+      // An index build committed — show the "buffering spectra" hint.
       useStore.setState({ ionIndexPreloading: true });
+      break;
+
+    case "ionIndexPreloadAborted":
+      // Build ended without a cache (too big / failed) — clear the hint.
+      useStore.setState({ ionIndexPreloading: false });
       break;
 
     case "ionIndexReady":

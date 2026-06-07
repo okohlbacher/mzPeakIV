@@ -292,11 +292,6 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
       <div className="dock__head">
         <span className="dock__title">{heading}</span>
 
-        {spectrumLoading && (
-          <span className="dock__meta" data-testid="spectrum-loading" style={{ color: "var(--text-faint)" }}>
-            Loading spectrum…
-          </span>
-        )}
         {!spectrumLoading && activeSpectrum && (
           <span className="dock__meta">
             {activeSpectrum.mz.length.toLocaleString()} pts · {activeSpectrum.id}
@@ -357,13 +352,22 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
         )}
       </div>
 
-      {/* uPlot chart — flex:1 so the ResizeObserver measures a real height. */}
-      <div
-        ref={containerRef}
-        data-testid="spectrum-plot"
-        className="dock__plot"
-        style={{ minHeight: 110 }}
-      />
+      {/* uPlot chart — flex:1 so the ResizeObserver measures a real height. The
+          wrap is the positioning context for the loading overlay. */}
+      <div className="dock__plot-wrap">
+        <div
+          ref={containerRef}
+          data-testid="spectrum-plot"
+          className="dock__plot"
+          style={{ minHeight: 110 }}
+        />
+        {spectrumLoading && (
+          <div className="spectrum-loading" data-testid="spectrum-loading-overlay" role="status" aria-live="polite">
+            <span className="mz-spinner" aria-hidden="true" />
+            <span>Loading spectrum…</span>
+          </div>
+        )}
+      </div>
 
       {/* BL-08: Peak table (centroid mode only) */}
       {isCentroid && peakRows.length > 0 && (

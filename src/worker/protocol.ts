@@ -54,7 +54,10 @@ export type WorkerRequest =
   // ADD-01: lazily decode an embedded optical TIFF (ZIP member) to RGBA. `gen`
   // is the load generation (echoed back) so results from a previous file are
   // dropped rather than cached into the newly-loaded file.
-  | { type: "getOpticalImage"; archivePath: string; gen: number };
+  | { type: "getOpticalImage"; archivePath: string; gen: number }
+  // Caching policy from the UI/URL: whether to preload the index in the background,
+  // and a hard cache size limit in bytes (0 = automatic / device-aware).
+  | { type: "setCacheConfig"; preloadEnabled: boolean; cacheLimitBytes: number };
 
 // ---------------------------------------------------------------------------
 // Outbound (Worker → main thread)
@@ -91,9 +94,12 @@ export type WorkerResponse =
   // channel render streams row groups. requestId echoes the originating render so
   // stale progress is ignored.
   | { type: "renderProgress"; requestId: number; done: number; total: number }
-  // Posted when the background index preload STARTS (after the TIC overview), so
-  // the UI can show an unobtrusive "buffering spectra" hint.
+  // Posted when an index build commits (fits the budget) — the UI shows a
+  // "buffering spectra" hint until ionIndexReady.
   | { type: "ionIndexPreloading" }
+  // Posted when a build ends without producing a cache (too big / open failed /
+  // superseded) — clears the "buffering" hint.
+  | { type: "ionIndexPreloadAborted" }
   // Posted once the in-memory ion-image index finishes building (after the first
   // full data pass). Tells the UI that subsequent ion images are instant + exact.
   | { type: "ionIndexReady"; points: number }

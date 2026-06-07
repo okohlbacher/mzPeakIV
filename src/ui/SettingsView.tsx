@@ -23,6 +23,10 @@ export function SettingsView({ defaultOpen = false }: { defaultOpen?: boolean })
   const setHistogramMode = useStore((s) => s.setHistogramMode);
   const peakDeltaMass = useStore((s) => s.peakDeltaMass);
   const setPeakDeltaMass = useStore((s) => s.setPeakDeltaMass);
+  const preloadEnabled = useStore((s) => s.preloadEnabled);
+  const setPreloadEnabled = useStore((s) => s.setPreloadEnabled);
+  const cacheLimitMB = useStore((s) => s.cacheLimitMB);
+  const setCacheLimitMB = useStore((s) => s.setCacheLimitMB);
 
   return (
     <Panel title="Settings" testid="settings-view" defaultOpen={defaultOpen}>
@@ -124,6 +128,37 @@ export function SettingsView({ defaultOpen = false }: { defaultOpen?: boolean })
             ]}
           />
         </div>
+      </div>
+
+      <div className="settings-card__group">
+        <div className="mz-overline">Caching</div>
+        <div className="popover__row">
+          <span className="popover__lbl">Preload spectra</span>
+          <Checkbox
+            checked={preloadEnabled}
+            onChange={setPreloadEnabled}
+            ariaLabel="preload spectra"
+          />
+        </div>
+        <div className="popover__row">
+          <span className="popover__lbl">Cache limit</span>
+          <NumberField
+            size="sm"
+            type="number"
+            width="92px"
+            unit="MB"
+            value={String(cacheLimitMB)}
+            onChange={(v) => setCacheLimitMB(Number(v) || 0)}
+            ariaLabel="cache limit MB"
+          />
+        </div>
+        <p className="settings-card__hint">
+          When on, the full spectra index is buffered in memory in the background
+          after the overview loads, so pixel spectra and ion images are instant.
+          Cache limit caps that buffer — <strong>0 = automatic</strong> (scaled to
+          your device's memory). A new limit applies to the next file load. Preset
+          via URL: <code>?preload=0</code>, <code>?cache=512</code>.
+        </p>
       </div>
 
       <p className="settings-card__hint">

@@ -40,6 +40,8 @@ export function App() {
   const sourceUrl = useStore((s) => s.sourceUrl);
   const ionIndexPreloading = useStore((s) => s.ionIndexPreloading);
   const ionIndexReady = useStore((s) => s.ionIndexReady);
+  const setPreloadEnabled = useStore((s) => s.setPreloadEnabled);
+  const setCacheLimitMB = useStore((s) => s.setCacheLimitMB);
 
   const loading =
     stage === "zip-index" ||
@@ -80,9 +82,21 @@ export function App() {
     if (deepLinkDone.current) return; // run once (StrictMode double-invoke safe)
     deepLinkDone.current = true;
     const p = new URLSearchParams(window.location.search);
+
+    // Caching presets — applied BEFORE any auto-open so the load uses them.
+    // ?preload=0|1 (off|on), ?cache=<MB>|auto (alias ?cacheMB=).
+    const pre = p.get("preload");
+    if (pre != null) setPreloadEnabled(!/^(0|false|off|no)$/i.test(pre.trim()));
+    const cache = p.get("cache") ?? p.get("cacheMB");
+    if (cache != null) {
+      const mb = /^auto$/i.test(cache.trim()) ? 0 : Number(cache);
+      if (Number.isFinite(mb) && mb >= 0) setCacheLimitMB(mb);
+    }
+
+    // Deep link: ?file=<url> (alias ?url=) auto-opens an external .mzpeak.
     const fileUrl = p.get("file") ?? p.get("url");
     if (fileUrl && /^(https?|s3):\/\//i.test(fileUrl)) void openUrl(fileUrl);
-  }, [openUrl]);
+  }, [openUrl, setPreloadEnabled, setCacheLimitMB]);
 
   // Build a shareable deep link to the currently-open URL-sourced file.
   function copyDeepLink() {

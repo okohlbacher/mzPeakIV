@@ -218,8 +218,23 @@
 .dock__title { font-size: var(--text-sm); font-weight: 600; color: var(--text-strong); }
 .dock__meta { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); }
 .dock__spacer { flex: 1; }
+.dock__plot-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .dock__plot { flex: 1; min-height: 0; position: relative; }
 /* NOTE: no `.dock__plot canvas { height:100% }` — uPlot sets its own pixel size. */
+
+/* Spectrum loading overlay (shown while a pixel/index spectrum is being fetched). */
+@keyframes mz-spin { to { transform: rotate(360deg); } }
+.mz-spinner {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
+  border-top-color: var(--blue-600, #3b54da);
+  animation: mz-spin 0.7s linear infinite;
+}
+.spectrum-loading {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  display: flex; align-items: center; justify-content: center; gap: var(--space-3);
+  color: var(--text-muted); font-size: var(--text-xs);
+}
 
 /* ── Status bar ──────────────────────────────────────────────────────────── */
 .statusbar {

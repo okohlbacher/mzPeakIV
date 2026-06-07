@@ -97,7 +97,10 @@ let ionCacheTooBig = false;
  * ≤ 65 535 cells, else i32) + intensity (f32, 4 B) ≈ 14 B. Datasets whose point
  * count exceeds this budget stream per render instead (correctness identical).
  */
-const MAX_CACHE_BYTES = 900_000_000; // ~900 MB → ~64M points at 14 B/point
+const MAX_CACHE_BYTES = 900_000_000; // ~900 MB → ~64M points at 14 B/point (auto default)
+/** Absolute ceiling on an explicit user-set cache limit, so a typo can't request
+ *  an absurd allocation (the build's try/catch still degrades to streaming). */
+const ABS_MAX_CACHE_BYTES = 4_000_000_000; // 4 GB
 // Bumped on every runFastLoad. Async background work (the deferred buildGridFast
 // loadResult) captures the value at start and refuses to post once superseded by
 // a newer load, so a slow background grid can't bleed into a freshly opened file
@@ -690,13 +693,22 @@ async function forEachSpectraRowGroup(
  * Parquet metadata FIRST (cheap, no data read) so over-budget files never trigger
  * a wasted streaming pass here.
  */
+// User/URL-configurable caching policy (set via the setCacheConfig message; see
+// the store + SettingsView). cfgCacheLimitBytes === 0 means "auto" (device-aware).
+let cfgPreloadEnabled = true;
+let cfgCacheLimitBytes = 0;
+
 /**
- * Effective cache budget in bytes — the smaller of the hard cap and a fraction of
- * device RAM. navigator.deviceMemory (GiB, Chromium; capped at 8 for privacy) lets
- * us be conservative on low-memory devices: a 2 GB machine gets ~400 MB, an 8 GB+
- * machine the full cap. Falls back to the hard cap when deviceMemory is unknown.
+ * Effective cache budget in bytes. If the user pinned an explicit limit it wins
+ * (bounded by a sane absolute ceiling); otherwise it's the smaller of the hard cap
+ * and a fraction of device RAM. navigator.deviceMemory (GiB, Chromium; capped at 8
+ * for privacy) lets us be conservative on low-memory devices: a 2 GB machine gets
+ * ~400 MB, an 8 GB+ machine the full cap.
  */
 function cacheBudgetBytes(): number {
+  if (cfgCacheLimitBytes > 0) {
+    return Math.min(cfgCacheLimitBytes, ABS_MAX_CACHE_BYTES); // explicit user limit
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dm = (self.navigator as any)?.deviceMemory;
   if (typeof dm === "number" && dm > 0) {
@@ -713,9 +725,16 @@ function tryBuildIonCache(requestId?: number): Promise<boolean> {
   if (activeIonCache) return Promise.resolve(true);
   if (ionCacheTooBig || !activeGrid) return Promise.resolve(false);
   if (ionCacheBuildPromise) return ionCacheBuildPromise; // join in-flight build
-  ionCacheBuildPromise = buildIonCacheInner(requestId).finally(() => {
-    ionCacheBuildPromise = null;
-  });
+  ionCacheBuildPromise = buildIonCacheInner(requestId)
+    .then((ok) => {
+      // Clear any "buffering" hint if the build didn't produce a cache (too big,
+      // open failed, or superseded). Idempotent — a no-op if never shown.
+      if (!ok) send({ type: "ionIndexPreloadAborted" });
+      return ok;
+    })
+    .finally(() => {
+      ionCacheBuildPromise = null;
+    });
   return ionCacheBuildPromise;
 }
 
@@ -759,6 +778,11 @@ async function buildIonCacheInner(requestId?: number): Promise<boolean> {
     ionCacheTooBig = true; // can't allocate the index — stream per render instead
     return false;
   }
+
+  // Committed to building (fits budget + allocated) → announce the buffering so
+  // the UI can show the "buffering spectra…" hint. Cleared by ionIndexReady (done)
+  // or ionIndexPreloadAborted (see tryBuildIonCache) on failure/supersede.
+  send({ type: "ionIndexPreloading" });
 
   // Invert grid: spectrum_index -> pixel (grid key).
   const siToPix = new Map<number, number>();
@@ -806,10 +830,12 @@ async function buildIonCacheInner(requestId?: number): Promise<boolean> {
  * ionIndexPreloading at start so the UI can show an unobtrusive "buffering" hint.
  */
 function maybePreloadIonIndex(mySeq: number): void {
+  if (!cfgPreloadEnabled) return; // background preload disabled by the user
   if (mySeq !== loadSeq) return; // superseded
   if (!activeGrid || activeIonCache || ionCacheTooBig || ionCacheBuildPromise) return;
-  send({ type: "ionIndexPreloading" });
-  void tryBuildIonCache(); // no requestId → silent background build
+  void tryBuildIonCache(); // no requestId → silent background build (emits its own
+  // ionIndexPreloading once it commits to building, so a too-small budget can't
+  // leave a stuck "buffering" hint).
 }
 
 /**
@@ -1310,6 +1336,16 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
   const msg = e.data;
   try {
     switch (msg.type) {
+      case "setCacheConfig": {
+        const wasDisabled = !cfgPreloadEnabled;
+        cfgPreloadEnabled = msg.preloadEnabled;
+        cfgCacheLimitBytes = Math.max(0, msg.cacheLimitBytes);
+        // If preload was just turned ON and a file is loaded but not yet buffered,
+        // start buffering now (don't wait for the next load).
+        if (wasDisabled && cfgPreloadEnabled) maybePreloadIonIndex(loadSeq);
+        break;
+      }
+
       case "loadUrl": {
         // Reset ALL module-scope state before each new file load (Pitfall 5).
         activeZipStorage = null;
