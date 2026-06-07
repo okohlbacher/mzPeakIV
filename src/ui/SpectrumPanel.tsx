@@ -135,6 +135,19 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
     const mono = "10px 'IBM Plex Mono', ui-monospace, monospace";
     const init = measure();
 
+    // uPlot paints on a <canvas>, which CANNOT resolve CSS var() strings — passing
+    // "var(--spectrum-line)" silently falls back (to the gray grid color), which is
+    // why the spectrum looked washed out. Resolve the design tokens to concrete
+    // color values here and hand uPlot real colors.
+    const cssVar = (name: string, fallback: string) => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    };
+    const lineColor = cssVar("--spectrum-line", "#16259e");
+    const fillColor = cssVar("--spectrum-fill", "rgba(22,37,158,0.12)");
+    const axisColor = cssVar("--spectrum-axis", "#1f2937");
+    const gridColor = cssVar("--spectrum-grid", "rgba(120,130,140,0.18)");
+
     const opts: uPlot.Options = {
       width: init.width,
       height: init.height,
@@ -150,9 +163,9 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
         },
         {
           label: "Intensity",
-          stroke: "var(--spectrum-line, #3b54da)",
-          fill: "var(--spectrum-fill, rgba(59,84,218,0.09))",
-          width: 1.4,
+          stroke: lineColor,
+          fill: fillColor,
+          width: 1.6,
           points: { show: false },
           value: (_u, v) => fmtIntensity(v),
         },
@@ -162,7 +175,9 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
           label: "m/z",
           labelFont: sans,
           font: mono,
-          stroke: "var(--text-muted, #6b757e)",
+          stroke: axisColor,
+          grid: { stroke: gridColor, width: 1 },
+          ticks: { stroke: gridColor, width: 1 },
           labelSize: 18,
           size: 38,
           values: (_u, ticks) =>
@@ -172,7 +187,9 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
           label: "Intensity",
           labelFont: sans,
           font: mono,
-          stroke: "var(--text-muted, #6b757e)",
+          stroke: axisColor,
+          grid: { stroke: gridColor, width: 1 },
+          ticks: { stroke: gridColor, width: 1 },
           labelSize: 18,
           size: 52,
           values: (_u, ticks) => (ticks ?? []).map((t) => fmtIntensity(t)),
@@ -403,8 +420,8 @@ export function SpectrumPanel({ setView }: { setView?: (v: View) => void }) {
                 title={`Render ion image for m/z ${row.mz.toFixed(4)} ± ${peakDeltaMass} Da`}
                 style={peakCellStyle}
               >
-                <span style={{ color: "var(--text-strong)" }}>{row.mz.toFixed(4)}</span>
-                <span style={{ color: "var(--text-faint)" }}>{row.rel.toFixed(1)}%</span>
+                <span style={{ color: "var(--spectrum-line)", fontWeight: 600 }}>{row.mz.toFixed(4)}</span>
+                <span style={{ color: "var(--text-body)" }}>{row.rel.toFixed(1)}%</span>
               </button>
             ))}
           </div>

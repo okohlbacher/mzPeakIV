@@ -110,8 +110,13 @@
   --signal:        var(--red-600);
   --signal-hover:  var(--red-700);
   --signal-subtle: var(--red-50);
-  --spectrum-line: var(--blue-600);
-  --spectrum-fill: rgba(59, 84, 218, 0.09);
+  /* Spectrum chart (drawn on a LIGHT canvas) — high-contrast for readability.
+     NOTE: these are read via getComputedStyle and passed to canvas as concrete
+     colors (canvas can't resolve var()), so keep them literal, not var() refs. */
+  --spectrum-line: #16259e;            /* deep blue — strong contrast on white */
+  --spectrum-fill: rgba(22, 37, 158, 0.12);
+  --spectrum-axis: #1f2937;            /* near-black axis ticks/labels */
+  --spectrum-grid: rgba(120, 130, 140, 0.18);
   --peak-line:     var(--red-600);
 
   --focus-ring: 0 0 0 3px rgba(59, 84, 218, 0.28);
