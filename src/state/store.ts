@@ -68,6 +68,9 @@ type State = {
   ionIndexReady: boolean;
   /** Number of points held in the in-memory ion-image index (null until built). */
   ionIndexPoints: number | null;
+  /** True while the index is being preloaded in the background (after the TIC
+   *  overview), before it's ready. Drives an unobtrusive "buffering" hint. */
+  ionIndexPreloading: boolean;
   /** True while a pixel/index spectrum read is in flight (instant from the index;
    *  up to ~tens of seconds on a cold remote read). Drives a loading hint. */
   spectrumLoading: boolean;
@@ -217,6 +220,7 @@ const initialState: State = {
   renderProgress: null,
   ionIndexReady: false,
   ionIndexPoints: null,
+  ionIndexPreloading: false,
   spectrumLoading: false,
   // BL defaults (persisted).
   ticNorm: persisted.ticNorm,
@@ -529,9 +533,14 @@ worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
       break;
     }
 
+    case "ionIndexPreloading":
+      // Background buffer started (after the TIC overview).
+      useStore.setState({ ionIndexPreloading: true });
+      break;
+
     case "ionIndexReady":
       // The in-memory ion-image index is built — later renders are instant + exact.
-      useStore.setState({ ionIndexReady: true, ionIndexPoints: msg.points });
+      useStore.setState({ ionIndexReady: true, ionIndexPoints: msg.points, ionIndexPreloading: false });
       break;
 
     case "renderProgress":

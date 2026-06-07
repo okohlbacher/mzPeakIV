@@ -38,6 +38,8 @@ export function App() {
   const viewZoom = useStore((s) => s.viewZoom);
   const openUrl = useStore((s) => s.openUrl);
   const sourceUrl = useStore((s) => s.sourceUrl);
+  const ionIndexPreloading = useStore((s) => s.ionIndexPreloading);
+  const ionIndexReady = useStore((s) => s.ionIndexReady);
 
   const loading =
     stage === "zip-index" ||
@@ -252,6 +254,16 @@ export function App() {
             </span>
           )}
           {grid && <span>{Math.round(viewZoom * 100)}% zoom</span>}
+          {hasShell && ionIndexPreloading && !ionIndexReady && (
+            <span data-testid="buffering-hint" title="Streaming the spectra into an in-memory index so pixel spectra and ion images are instant.">
+              buffering spectra…
+            </span>
+          )}
+          {hasShell && ionIndexReady && (
+            <span data-testid="buffered-hint" title="Spectra buffered in memory — pixel spectra and ion images are instant.">
+              ⚡ buffered
+            </span>
+          )}
         </footer>
       </div>
 

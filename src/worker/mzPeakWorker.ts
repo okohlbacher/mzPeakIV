@@ -350,6 +350,11 @@ async function runFastLoad(store: ZipStorage<any>): Promise<void> {
         mixedRepresentationWarning: null,
       },
     }, transferList);
+
+    // TIC overview is now up → proactively buffer the spectra in the background
+    // (if the index fits the device-aware memory budget) so pixel spectra and ion
+    // images are instant when the user gets to them.
+    maybePreloadIonIndex(mySeq);
   }).catch((e) => console.warn("[runFastLoad] background buildGridFast failed:", e));
 }
 
@@ -685,9 +690,39 @@ async function forEachSpectraRowGroup(
  * Parquet metadata FIRST (cheap, no data read) so over-budget files never trigger
  * a wasted streaming pass here.
  */
-async function tryBuildIonCache(requestId?: number): Promise<boolean> {
+/**
+ * Effective cache budget in bytes — the smaller of the hard cap and a fraction of
+ * device RAM. navigator.deviceMemory (GiB, Chromium; capped at 8 for privacy) lets
+ * us be conservative on low-memory devices: a 2 GB machine gets ~400 MB, an 8 GB+
+ * machine the full cap. Falls back to the hard cap when deviceMemory is unknown.
+ */
+function cacheBudgetBytes(): number {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dm = (self.navigator as any)?.deviceMemory;
+  if (typeof dm === "number" && dm > 0) {
+    return Math.min(MAX_CACHE_BYTES, Math.floor(dm * 1e9 * 0.2)); // ≤ 20% of RAM
+  }
+  return MAX_CACHE_BYTES;
+}
+
+// Single-flight guard: the background preload and an on-demand render must never
+// build the index twice. A second caller joins the in-flight build's promise.
+let ionCacheBuildPromise: Promise<boolean> | null = null;
+
+function tryBuildIonCache(requestId?: number): Promise<boolean> {
+  if (activeIonCache) return Promise.resolve(true);
+  if (ionCacheTooBig || !activeGrid) return Promise.resolve(false);
+  if (ionCacheBuildPromise) return ionCacheBuildPromise; // join in-flight build
+  ionCacheBuildPromise = buildIonCacheInner(requestId).finally(() => {
+    ionCacheBuildPromise = null;
+  });
+  return ionCacheBuildPromise;
+}
+
+async function buildIonCacheInner(requestId?: number): Promise<boolean> {
   if (activeIonCache) return true;
   if (ionCacheTooBig || !activeGrid) return false;
+  const mySeq = loadSeq; // abort if a newer file load supersedes this build
 
   const probe = await openIndependentSpectraParquet();
   if (!probe) return false;
@@ -701,10 +736,10 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   const nPix = activeGrid.width * activeGrid.height;
   const useU16 = nPix <= 0xffff;
   const bytesPerPoint = 8 + (useU16 ? 2 : 4) + 4;
-  // HARD SIZE LIMIT: never build an index larger than the budget. nPoints is the
-  // total row count (an upper bound on on-grid points), read cheaply from metadata
-  // so an over-budget file never allocates anything — it streams per render.
-  if (!Number.isFinite(nPoints) || nPoints <= 0 || nPoints * bytesPerPoint > MAX_CACHE_BYTES) {
+  // HARD SIZE LIMIT: never build an index larger than the (device-aware) budget.
+  // nPoints is the total row count (an upper bound on on-grid points), read cheaply
+  // from metadata so an over-budget file never allocates anything — it streams.
+  if (!Number.isFinite(nPoints) || nPoints <= 0 || nPoints * bytesPerPoint > cacheBudgetBytes()) {
     ionCacheTooBig = true;
     return false;
   }
@@ -748,6 +783,7 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
     }
   }, requestId);
   if (!ok) return false;
+  if (mySeq !== loadSeq) return false; // a newer load superseded us — don't commit
 
   // subarray() returns a view (no copy); on-grid points are usually ≈ all points,
   // so the unused tail (if any) is negligible and still within budget.
@@ -759,6 +795,21 @@ async function tryBuildIonCache(requestId?: number): Promise<boolean> {
   activeIonCacheSiToPix = siToPix; // enables instant per-pixel spectra
   send({ type: "ionIndexReady", points: w });
   return true;
+}
+
+/**
+ * Background preload: once the TIC overview is up, proactively build the in-memory
+ * index (streaming spectra_data) IF it fits the device-aware memory budget — so by
+ * the time the user clicks a pixel or requests an ion image, it's already buffered.
+ * Fire-and-forget; single-flighted with on-demand builds; no render-progress spam
+ * (no requestId). Guarded by loadSeq so a superseded load aborts. Emits
+ * ionIndexPreloading at start so the UI can show an unobtrusive "buffering" hint.
+ */
+function maybePreloadIonIndex(mySeq: number): void {
+  if (mySeq !== loadSeq) return; // superseded
+  if (!activeGrid || activeIonCache || ionCacheTooBig || ionCacheBuildPromise) return;
+  send({ type: "ionIndexPreloading" });
+  void tryBuildIonCache(); // no requestId → silent background build
 }
 
 /**
@@ -1267,6 +1318,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeGrid = null;
         activeIonCache = null;
         activeIonCacheSiToPix = null;
+        ionCacheBuildPromise = null; // drop ref to any superseded in-flight build
         ionCacheTooBig = false;
 
         // FAST PATH: read only mzpeak_index.json (~600 bytes) via range request.
@@ -1296,6 +1348,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         activeGrid = null;
         activeIonCache = null;
         activeIonCacheSiToPix = null;
+        ionCacheBuildPromise = null; // drop ref to any superseded in-flight build
         ionCacheTooBig = false;
         activeSourceUrl = null; // local/in-memory — independent connections N/A
 

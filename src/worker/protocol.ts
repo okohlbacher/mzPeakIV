@@ -91,6 +91,9 @@ export type WorkerResponse =
   // channel render streams row groups. requestId echoes the originating render so
   // stale progress is ignored.
   | { type: "renderProgress"; requestId: number; done: number; total: number }
+  // Posted when the background index preload STARTS (after the TIC overview), so
+  // the UI can show an unobtrusive "buffering spectra" hint.
+  | { type: "ionIndexPreloading" }
   // Posted once the in-memory ion-image index finishes building (after the first
   // full data pass). Tells the UI that subsequent ion images are instant + exact.
   | { type: "ionIndexReady"; points: number }
