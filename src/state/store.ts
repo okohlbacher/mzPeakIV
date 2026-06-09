@@ -45,6 +45,10 @@ type State = {
    *  the deep-link "Copy link" button; kept as the user-supplied form (e.g. an
    *  `s3://` link stays `s3://`) so a copied link round-trips through resolveLoadUrl. */
   sourceUrl: string | null;
+  /** Non-fatal notice for a deep-link target that couldn't be honored (e.g. a
+   *  scan/ion/optical referenced in the URL that doesn't exist). The file still
+   *  loads and the overview shows; this is surfaced as a dismissible banner. */
+  deepLinkNotice: string | null;
   /** D-08 named warning: set only when a file mixes profile + centroid spectra. */
   mixedRepresentationWarning: string | null;
   stage: LoadStage;
@@ -123,6 +127,8 @@ type Actions = {
   /** Caching policy setters (persisted + pushed to the worker). */
   setPreloadEnabled: (enabled: boolean) => void;
   setCacheLimitMB: (mb: number) => void;
+  /** Set/clear the non-fatal deep-link notice banner. */
+  setDeepLinkNotice: (msg: string | null) => void;
   // BL-02: multi-channel overlay.
   renderMultiChannel: (channels: (ChannelRequest | null)[]) => void;
   // BL-03: mean spectrum across all pixels.
@@ -218,6 +224,7 @@ const initialState: State = {
   tic: null,
   fileSize: null,
   sourceUrl: null,
+  deepLinkNotice: null,
   mixedRepresentationWarning: null,
   stage: "idle",
   error: null,
@@ -470,6 +477,10 @@ export const useStore = create<State & Actions>((set) => ({
     set({ cacheLimitMB: v });
     persistSettings();
     sendCacheConfig();
+  },
+
+  setDeepLinkNotice(msg: string | null) {
+    set({ deepLinkNotice: msg });
   },
 
   // BL-02: Render an RGB multi-channel overlay.

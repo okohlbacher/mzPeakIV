@@ -42,6 +42,8 @@ export function App() {
   const ionIndexReady = useStore((s) => s.ionIndexReady);
   const setPreloadEnabled = useStore((s) => s.setPreloadEnabled);
   const setCacheLimitMB = useStore((s) => s.setCacheLimitMB);
+  const deepLinkNotice = useStore((s) => s.deepLinkNotice);
+  const setDeepLinkNotice = useStore((s) => s.setDeepLinkNotice);
 
   const loading =
     stage === "zip-index" ||
@@ -77,6 +79,17 @@ export function App() {
   // http(s):// and s3:// are accepted (resolveLoadUrl maps s3:// → HTTPS); this
   // blocks javascript:/data: URLs. The URL is only ever fetched + rendered as
   // text, so there is no XSS surface from the param.
+  // A deep-link target to apply ONCE the file reaches "ready": jump to a scan
+  // (?scan=N, 1-based as shown in the UI), an ion image (?ion=<m/z>[&tol=Da]), or
+  // an optical image (?optical=<index|name>). Parsed on mount; applied below.
+  const pendingDeepRef = useRef<
+    | { kind: "scan"; scan: number }
+    | { kind: "ion"; mz: number; tol: number | null }
+    | { kind: "optical"; ref: string }
+    | null
+  >(null);
+  const deepAppliedRef = useRef(false);
+
   const deepLinkDone = useRef(false);
   useEffect(() => {
     if (deepLinkDone.current) return; // run once (StrictMode double-invoke safe)
@@ -93,10 +106,93 @@ export function App() {
       if (Number.isFinite(mb) && mb >= 0) setCacheLimitMB(mb);
     }
 
+    // View deep-link target (scan > ion > optical, first present wins).
+    const scan = p.get("scan");
+    const ion = p.get("ion");
+    const optical = p.get("optical");
+    if (scan != null && scan.trim() !== "") {
+      pendingDeepRef.current = { kind: "scan", scan: Number(scan) };
+    } else if (ion != null && ion.trim() !== "") {
+      const tol = p.get("tol");
+      pendingDeepRef.current = {
+        kind: "ion",
+        mz: Number(ion),
+        tol: tol != null && tol.trim() !== "" ? Number(tol) : null,
+      };
+    } else if (optical != null) {
+      pendingDeepRef.current = { kind: "optical", ref: optical.trim() };
+    }
+
     // Deep link: ?file=<url> (alias ?url=) auto-opens an external .mzpeak.
     const fileUrl = p.get("file") ?? p.get("url");
     if (fileUrl && /^(https?|s3):\/\//i.test(fileUrl)) void openUrl(fileUrl);
   }, [openUrl, setPreloadEnabled, setCacheLimitMB]);
+
+  // Apply the pending deep-link target once the file has loaded. Invalid targets
+  // (missing scan / out-of-range m/z / unknown optical) leave the overview up and
+  // surface a dismissible notice instead of erroring out the whole load.
+  useEffect(() => {
+    const pending = pendingDeepRef.current;
+    if (!pending || deepAppliedRef.current) return;
+    // Wait for the FULL overview: `stats` (numSpectra / m/z range) lands with the
+    // second loadResult, after `ready` is first set. Gating on stats also ensures
+    // opticalImages (sent earlier) are present.
+    const loaded = (ready || noImaging) && stats != null;
+    if (!loaded) return;
+    deepAppliedRef.current = true;
+
+    const s = useStore.getState();
+    if (pending.kind === "scan") {
+      const n = s.stats?.numSpectra ?? 0;
+      const idx = pending.scan - 1; // ?scan is 1-based (matches the displayed "scan=N")
+      if (Number.isInteger(pending.scan) && idx >= 0 && idx < n) {
+        s.selectSpectrum(idx);
+        setView("overview");
+      } else {
+        s.setDeepLinkNotice(
+          `Scan ${pending.scan} not found — this file has ${n.toLocaleString()} scans (1–${n}).`,
+        );
+      }
+    } else if (pending.kind === "ion") {
+      const range = s.stats?.mzRange;
+      const tol = pending.tol && pending.tol > 0 ? pending.tol : s.peakDeltaMass;
+      if (!Number.isFinite(pending.mz) || pending.mz <= 0) {
+        s.setDeepLinkNotice(`Invalid m/z in the ?ion= link.`);
+      } else if (!isImaging) {
+        s.setDeepLinkNotice(`This file has no imaging coordinates — can't render an ion image.`);
+      } else if (range && (pending.mz < range[0] || pending.mz > range[1])) {
+        s.setDeepLinkNotice(
+          `m/z ${pending.mz} is outside this file's range (${range[0].toFixed(1)}–${range[1].toFixed(1)}).`,
+        );
+      } else {
+        s.renderIonImage(pending.mz, tol);
+        setView("ion");
+      }
+    } else {
+      // optical
+      const imgs = s.opticalImages ?? [];
+      if (imgs.length === 0) {
+        s.setDeepLinkNotice(`This file has no optical images.`);
+      } else {
+        const z = pending.ref;
+        let match = /^\d+$/.test(z) && Number(z) < imgs.length ? imgs[Number(z)] : undefined;
+        if (!match) {
+          const zl = z.toLowerCase();
+          match = imgs.find(
+            (im) =>
+              (im.sourceName ?? "").toLowerCase().includes(zl) ||
+              (im.archivePath ?? "").toLowerCase().includes(zl),
+          );
+        }
+        if (match) {
+          s.setSelectedOpticalPath(match.archivePath);
+          setView("optical");
+        } else {
+          s.setDeepLinkNotice(`Optical image "${z}" not found — this file has ${imgs.length}.`);
+        }
+      }
+    }
+  }, [ready, noImaging, isImaging, stats, setView]);
 
   // Build a shareable deep link to the currently-open URL-sourced file.
   function copyDeepLink() {
@@ -207,6 +303,19 @@ export function App() {
 
           <div className="center">
             {loading && <ProgressBar stage={stage} />}
+
+            {hasShell && deepLinkNotice && (
+              <div className="deeplink-notice" role="alert" data-testid="deep-link-notice">
+                <span>⚠ {deepLinkNotice}</span>
+                <button
+                  className="iconbtn"
+                  aria-label="Dismiss"
+                  onClick={() => setDeepLinkNotice(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {hasShell && (
               <>
