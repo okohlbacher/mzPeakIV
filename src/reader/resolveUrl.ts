@@ -7,11 +7,12 @@
 // only — NO request signing in the browser). http(s) URLs pass through unchanged.
 
 /**
- * Default S3 HTTPS endpoint used to resolve `s3://` URLs (StackIT object storage).
- * `s3://<bucket>/<key>` → `<endpoint>/<bucket>/<key>` (path-style addressing).
+ * Default HTTPS endpoint used to resolve `s3://` URLs — the StackIT CDN
+ * (BunnyCDN edge, HTTP/2) in front of the object-storage bucket.
+ * `s3://<bucket>/<key>` → `<endpoint>/<bucket>/<key>` (path-style addressing,
+ * preserved by the CDN pull zone, e.g. `s3://v09/demo/x` → `…/v09/demo/x`).
  */
-export const DEFAULT_S3_HTTPS_ENDPOINT =
-  "https://object.storage.eu01.onstackit.cloud";
+export const DEFAULT_S3_HTTPS_ENDPOINT = "https://data.mzpeak.org";
 
 /**
  * Resolve a load URL: rewrite `s3://bucket/key` to the configured HTTPS endpoint;

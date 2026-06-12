@@ -10,7 +10,13 @@
 // DO NOT: import from ../state/store, instantiate `new Worker(...)` in this file.
 
 import { ZipStorage } from "mzpeakts";
-import { Uint8ArrayWriter, HttpRangeReader } from "@zip.js/zip.js";
+import { Uint8ArrayWriter, HttpReader } from "@zip.js/zip.js";
+
+// forceRangeRequests: the CDN (data.mzpeak.org) serves correct 206 range responses
+// but omits `Accept-Ranges` on them, which makes zip.js throw "HTTP Range not
+// supported". Range works (206 + Content-Range), so force it. useRangeHeader makes
+// HttpReader behave like the range reader.
+const RANGE_OPTS = { useRangeHeader: true, forceRangeRequests: true } as const;
 import { ParquetFile, readParquet } from "parquet-wasm";
 import { tableFromIPC } from "apache-arrow";
 import { buildMiniParquet, type ColChunk } from "./parquetMini";
@@ -208,7 +214,7 @@ async function openSpectraDataParquet(): Promise<ParquetFile | null> {
 async function openIndependentSpectraParquet(): Promise<ParquetFile | null> {
   if (!activeSourceUrl) return openSpectraDataParquet(); // local: in-memory
   try {
-    const store = new ZipStorage(new HttpRangeReader(activeSourceUrl));
+    const store = new ZipStorage(new HttpReader(activeSourceUrl, RANGE_OPTS));
     await store.init();
     const entry = store.fileIndex.files.find(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1368,7 +1374,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         // which a correct CORS rule (allowing only Range) rejects → "Failed to
         // fetch". Build the reader ourselves with no extra headers so a minimal,
         // correct bucket CORS policy (GET + Range) is all that's needed.
-        const store = new ZipStorage(new HttpRangeReader(msg.url));
+        const store = new ZipStorage(new HttpReader(msg.url, RANGE_OPTS));
         await store.init();
         activeZipStorage = store;
         activeSourceUrl = msg.url;
