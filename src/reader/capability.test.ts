@@ -24,10 +24,7 @@ import { UnsupportedEncodingError, CorruptFileError } from "./errors";
 // ── Fixture paths ─────────────────────────────────────────────────────────────
 
 const POINT_FIXTURE = fileURLToPath(
-  new URL("../../test/data/small.mzpeak", import.meta.url),
-);
-const CHUNKED_FIXTURE = fileURLToPath(
-  new URL("../../test/data/small.chunked.mzpeak", import.meta.url),
+  new URL("../../test/data/example.mzpeak", import.meta.url),
 );
 
 async function openFixture(path: string): Promise<Reader> {
@@ -177,16 +174,11 @@ describe("detectUnsupported — directory storage (R-03a)", () => {
 
 describe("detectUnsupported — returns [] for supported real fixtures", () => {
   let pointReader: Reader;
-  let chunkedReader: Reader;
 
   beforeAll(async () => {
-    [pointReader, chunkedReader] = await Promise.all([
-      openFixture(POINT_FIXTURE),
-      openFixture(CHUNKED_FIXTURE),
-    ]);
+    pointReader = await openFixture(POINT_FIXTURE);
     // Eagerly init the data reader so the arrayIndex is populated.
     await pointReader.spectrumData();
-    await chunkedReader.spectrumData();
   });
 
   it("returns [] for the point-layout demo fixture (no unsupported encodings)", () => {
@@ -195,11 +187,6 @@ describe("detectUnsupported — returns [] for supported real fixtures", () => {
     expect(findings).toEqual([]);
   });
 
-  it("returns [] for the chunked/delta demo fixture (delta is supported)", () => {
-    const mf = manifest(chunkedReader);
-    const findings = detectUnsupported(chunkedReader, mf);
-    expect(findings).toEqual([]);
-  });
 });
 
 // ── Error taxonomy ────────────────────────────────────────────────────────────

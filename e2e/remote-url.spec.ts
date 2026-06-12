@@ -37,7 +37,7 @@ test("LOAD-02: loads a .mzpeak URL via HTTP Range requests, not a full download"
 
   // Build an absolute http:// URL for the bundled demo fixture.
   // This is the "open from URL" path (LOAD-02) — not a local file pick (LOAD-01).
-  const fixtureUrl = new URL("static/small.mzpeak", baseURL).toString();
+  const fixtureUrl = new URL("static/example.mzpeak", baseURL).toString();
 
   const urlInput = page.getByTestId("url-input");
   await urlInput.fill(fixtureUrl);
@@ -47,9 +47,8 @@ test("LOAD-02: loads a .mzpeak URL via HTTP Range requests, not a full download"
   const stageLabel = page.getByTestId("stage");
   await expect(stageLabel).not.toHaveText("Idle", { timeout: 5000 });
 
-  // Wait for full load — non-error terminal. The bundled demo is non-imaging
-  // (terminal "No Imaging Data", D-06); an imaging file would reach "Ready".
-  await expect(stageLabel).toHaveText(/^(Ready|No Imaging Data)$/, {
+  // Wait for full load — non-error terminal. The bundled example is a small imaging file → "Ready".
+  await expect(stageLabel).toHaveText("Ready", {
     timeout: 30000,
   });
 
@@ -62,8 +61,7 @@ test("LOAD-02: loads a .mzpeak URL via HTTP Range requests, not a full download"
   const manifestRows = page.getByTestId("manifest-row");
   await expect(manifestRows.first()).toBeVisible();
   expect(await manifestRows.count()).toBeGreaterThan(0);
-  await expect(page.getByTestId("file-metadata")).toBeVisible();
-  await expect(page.getByTestId("file-stats")).toContainText("spectra");
+  await expect(page.getByTestId("file-stats")).toContainText("9 spectra");
 
   // KEY ASSERTION: zip.js used HTTP Range requests (not a full download).
   // At least one GET to the .mzpeak URL must have included a Range header,

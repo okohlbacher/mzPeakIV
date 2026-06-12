@@ -1,21 +1,19 @@
 import { useState, useRef } from "react";
+import { Play, Download, ShieldCheck } from "lucide-react";
 import { useStore } from "../state/store";
 
-// Default demo URL — a small file bundled SAME-ORIGIN under the app's own base
-// path (mirrors how the upstream mzpeakts demo loads `static/small.mzpeak`).
-// Same-origin requests never hit CORS, so this loads instantly and offline. The
-// BASE_URL prefix keeps it correct under the GitHub-Pages project sub-path.
-const DEFAULT_DEMO_URL = `${import.meta.env.BASE_URL}static/small.mzpeak`;
+// Small bundled imaging example — the imzML spec "Example_Continuous" MSI file
+// (~280 KB), served SAME-ORIGIN under the app's base path. Same-origin requests
+// never hit CORS, so it loads instantly and offline, and (unlike the old
+// non-imaging demo) it reconstructs a real pixel grid + overview.
+const SMALL_EXAMPLE_URL = `${import.meta.env.BASE_URL}static/example.mzpeak`;
 
-// Optional remote example: the full PXD001283 HR2MSI imaging dataset on object
-// storage. The browser streams it via HTTP Range, so the bucket must serve it
-// with public read, byte-range support, and CORS allowing this origin
-// (GET + Range; expose Content-Range / Accept-Ranges) — see BL-CORS. Until then
-// this example surfaces a clear network/CORS error rather than loading.
-const REMOTE_EXAMPLE = {
-  label: "HR2MSI imaging example",
-  url: "https://object.storage.eu01.onstackit.cloud/v09/demo/PXD001283-HR2MSI-urinary-bladder_HR2MSImouseurinarybladderS096.mzpeak",
-};
+// The headline demo: the full PXD001283 HR2MSI imaging dataset, served via the
+// StackIT CDN (BunnyCDN edge, HTTP/2) at data.mzpeak.org. The browser streams it
+// via HTTP Range; the CDN serves public read, byte-range support, and CORS
+// (Allow-Origin *, GET + Range, exposes Content-Range / Accept-Ranges).
+const DEMO_URL =
+  "https://data.mzpeak.org/v09/demo/PXD001283-HR2MSI-urinary-bladder_HR2MSImouseurinarybladderS096.mzpeak";
 
 interface Props {
   /** Whether a load is already in progress (disables inputs). */
@@ -23,28 +21,24 @@ interface Props {
 }
 
 /**
- * Unified loader zone: file picker + drag-and-drop zone + URL input.
- *
- * - `<input type=file>` — standard file picker (used by the Playwright test via
- *   `page.setInputFiles`; also satisfies R-02a / LOAD-01).
- * - Drag-and-drop zone — accepts the first `.mzpeak` file dropped.
- * - URL `<input>` — loads from a remote URL (the original walking-skeleton path).
- *
- * Calls `store.openFile` for local files and `store.openUrl` for URL loads.
+ * Unified loader zone: drag-and-drop / file picker, a privacy strip, one-click
+ * example datasets, and an arbitrary-URL field. Composition mirrors mzPeakExplorer's
+ * starting page (dropzone → privacy → actions → hint → URL). Drives the store's
+ * openFile / openUrl. Preserves the test-facing ids: drop-zone, file-input,
+ * url-input, load-button, example-remote, example-small, download-demo, privacy-note.
  */
 export function FileLoader({ loading }: Props) {
   const openFile = useStore((s) => s.openFile);
   const openUrl = useStore((s) => s.openUrl);
 
-  // Start empty (paste your own URL); the demos load via the chips below. A
-  // pre-filled long URL just rendered as a confusing truncated path in the box.
   const [url, setUrl] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── File picker / drag-drop shared handler ──────────────────────────────
   function handleFile(file: File) {
-    if (!file.name.endsWith(".mzpeak")) {
+    // Case-insensitive extension check (matches Explorer; tolerates ".MZPEAK").
+    if (!file.name.toLowerCase().endsWith(".mzpeak")) {
       alert("Please select a .mzpeak file.");
       return;
     }
@@ -58,9 +52,10 @@ export function FileLoader({ loading }: Props) {
     e.target.value = "";
   }
 
-  // ── Drag-and-drop ──────────────────────────────────────────────────────
+  // ── Drag-and-drop (no-op while a load is already in progress) ───────────
   function onDragOver(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
+    if (loading) return;
     e.dataTransfer.dropEffect = "copy";
     setDragOver(true);
   }
@@ -73,6 +68,7 @@ export function FileLoader({ loading }: Props) {
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
+    if (loading) return;
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
   }
@@ -84,8 +80,8 @@ export function FileLoader({ loading }: Props) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)", width: "100%" }}>
-      {/* ── Drag-and-drop zone ── */}
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", width: "100%" }}>
+      {/* ── Drag-and-drop zone (also click-to-browse) ── */}
       <div
         className="drop"
         data-testid="drop-zone"
@@ -96,20 +92,22 @@ export function FileLoader({ loading }: Props) {
         onClick={() => !loading && fileInputRef.current?.click()}
         role="button"
         aria-label="Drop a .mzpeak file here or click to browse"
+        aria-disabled={loading || undefined}
         tabIndex={loading ? -1 : 0}
         onKeyDown={(e) => {
-          if ((e.key === "Enter" || e.key === " ") && !loading)
-            fileInputRef.current?.click();
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault(); // Space must never scroll the page
+            if (!loading) fileInputRef.current?.click();
+          }
         }}
         style={loading ? { cursor: "not-allowed", opacity: 0.6 } : undefined}
       >
         <span>
-          Drop a <strong>.mzpeak</strong> file here, or <strong>browse</strong>
+          Drop a <strong>.mzpeak</strong> file, or <u>browse</u>
         </span>
       </div>
 
-      {/* Hidden file input — activated by the drop zone click handler above.
-          Playwright uses page.setInputFiles() on this element (R-02a). */}
+      {/* Hidden file input — activated by the drop zone (Playwright setInputFiles). */}
       <input
         ref={fileInputRef}
         data-testid="file-input"
@@ -121,7 +119,56 @@ export function FileLoader({ loading }: Props) {
         aria-label="mzpeak-file"
       />
 
-      {/* ── URL row ── */}
+      {/* ── Privacy reassurance strip ── */}
+      <p className="loader__privacy" data-testid="privacy-note">
+        <ShieldCheck size={15} aria-hidden="true" />
+        <span>
+          <strong>Private by design.</strong> Your data is read and analyzed
+          entirely in this browser — local files are never uploaded; a URL is
+          fetched directly by your browser. No tracking.
+        </span>
+      </p>
+
+      {/* ── Example datasets (imaging demo is the headline action) ── */}
+      <div className="loader__actions">
+        <button
+          type="button"
+          className="mz-btn mz-btn--primary"
+          data-testid="example-remote"
+          disabled={loading}
+          title={DEMO_URL}
+          onClick={() => {
+            setUrl(DEMO_URL);
+            if (!loading) void openUrl(DEMO_URL);
+          }}
+        >
+          <Play size={14} aria-hidden="true" /> Open demo
+        </button>
+        <button
+          type="button"
+          className="mz-btn mz-btn--secondary"
+          data-testid="example-small"
+          disabled={loading}
+          title="Small bundled imaging example (loads instantly, offline)"
+          onClick={() => !loading && void openUrl(SMALL_EXAMPLE_URL)}
+        >
+          Small example
+        </button>
+      </div>
+
+      {/* The imaging demo streams a ~294 MB file; downloading it once and opening
+          it locally renders ion images far faster. */}
+      <a className="loader__download" data-testid="download-demo" href={DEMO_URL} download target="_blank" rel="noopener">
+        <Download size={13} aria-hidden="true" /> Download demo file
+      </a>
+
+      <p className="loader__hint">
+        The imaging demo streams over the network (overview in seconds; full ion
+        images are faster after downloading). The small example is bundled and
+        instant.
+      </p>
+
+      {/* ── Arbitrary URL ── */}
       <form className="loader__url" onSubmit={onUrlSubmit}>
         <span className="mz-input">
           <input
@@ -137,50 +184,12 @@ export function FileLoader({ loading }: Props) {
         <button
           data-testid="load-button"
           type="submit"
-          className="mz-btn mz-btn--secondary"
+          className="mz-btn mz-btn--primary"
           disabled={loading || !url.trim()}
         >
           {loading ? "Loading…" : "Load URL"}
         </button>
       </form>
-
-      {/* One-click example datasets. */}
-      <div className="loader__demos">
-        <button
-          type="button"
-          className="chip"
-          data-testid="example-small"
-          disabled={loading}
-          title="Small bundled demo (non-imaging, loads instantly)"
-          onClick={() => !loading && void openUrl(DEFAULT_DEMO_URL)}
-        >
-          Small demo
-        </button>
-        <button
-          type="button"
-          className="chip"
-          data-testid="example-remote"
-          disabled={loading}
-          title={REMOTE_EXAMPLE.url}
-          onClick={() => {
-            setUrl(REMOTE_EXAMPLE.url);
-            if (!loading) void openUrl(REMOTE_EXAMPLE.url);
-          }}
-        >
-          {REMOTE_EXAMPLE.label}
-        </button>
-      </div>
-
-      {/* The imaging example streams a ~294 MB file over the network; downloading
-          it once and opening it locally renders ion images far faster. */}
-      <a
-        className="loader__download"
-        data-testid="download-demo"
-        href={REMOTE_EXAMPLE.url}
-        download
-      >
-        ↓ Download demo data for faster access
-      </a>
     </div>
   );
 }

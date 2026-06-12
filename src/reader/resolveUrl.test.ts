@@ -30,8 +30,8 @@ describe("resolveLoadUrl", () => {
     expect(resolveLoadUrl("https://example.com/f.mzpeak")).toBe(
       "https://example.com/f.mzpeak",
     );
-    expect(resolveLoadUrl("  /mzPeakIV/static/small.mzpeak ")).toBe(
-      "/mzPeakIV/static/small.mzpeak",
+    expect(resolveLoadUrl("  /mzPeakIV/static/example.mzpeak ")).toBe(
+      "/mzPeakIV/static/example.mzpeak",
     );
   });
 

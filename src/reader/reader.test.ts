@@ -6,10 +6,10 @@ import { openBlob, type Reader } from "./openUrl";
 import { fileMeta, manifest, spectrumMeta, fileStats } from "./fileMeta";
 import { getSpectrumArrays } from "./arrays";
 
-// Canonical Phase-1 fixture: the upstream demo POINT-layout file, vendored into
-// test/data/ from the mzpeakts submodule (recorded in SKELETON.md).
+// Canonical Phase-1 fixture: the small bundled imaging example (imzML
+// Example_Continuous), a real imaging MSI file.
 const FIXTURE = fileURLToPath(
-  new URL("../../test/data/small.mzpeak", import.meta.url),
+  new URL("../../test/data/example.mzpeak", import.meta.url),
 );
 
 async function openFixture(): Promise<Reader> {
@@ -19,7 +19,7 @@ async function openFixture(): Promise<Reader> {
   return await openBlob(blob);
 }
 
-describe("reader boundary against real small.mzpeak", () => {
+describe("reader boundary against real example.mzpeak", () => {
   let reader: Reader;
 
   beforeAll(async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PanelLeft, FolderOpen, ShieldCheck, Link2, Check } from "lucide-react";
+import { PanelLeft, FolderOpen, Link2, Check } from "lucide-react";
 
 import { useStore } from "../state/store";
 import { STAGE_LABEL } from "./stageLabels";
@@ -390,16 +390,19 @@ export function App() {
         </footer>
       </div>
 
-      {/* ── Loader overlay (idle, or "Open file") ─────────────────────────── */}
+      {/* ── Loader overlay ─────────────────────────────────────────────────
+          First-load idle = a bare, airy light column (mzPeakExplorer's starting
+          page). "Open file" reopen / a load error = a contained dialog card over
+          the loaded app (`--dialog` variant). One FileLoader behaviour either way. */}
       {showLoaderOverlay && (
-        <div className="loader">
-          <div className="loader__card">
+        <div className={`loader${reopen || isError ? " loader--dialog" : ""}`}>
+          <div className={`loader__card${reopen || isError ? " loader__card--dialog" : ""}`}>
             <img className="loader__logo" src={LOGO} alt="OpenMS" />
-            <div className="loader__h">Open an imaging mzPeak file</div>
+            <h2 className="loader__h">Inspect an imaging mzPeak file</h2>
             <div className="loader__p">
-              reconstruct the spatial pixel grid, render ion images for an m/z
-              window, and inspect the spectrum behind any pixel — entirely in the
-              browser.
+              Open an imaging mzPeak file to reconstruct the spatial pixel grid,
+              render ion images for an m/z window, and inspect the spectrum behind
+              any pixel — entirely in your browser.
             </div>
             {isError && error && (
               <div style={{ width: "100%" }}>
@@ -408,15 +411,6 @@ export function App() {
             )}
             <FileLoader loading={loading} />
             {loading && <ProgressBar stage={stage} />}
-            <p className="loader__note" data-testid="privacy-note">
-              <ShieldCheck size={14} aria-hidden="true" />
-              <span>
-                <strong>Private by design.</strong> Your file is read and analyzed
-                entirely in your browser — no upload, no server, no tracking. A
-                local file never leaves your device; a URL is fetched directly into
-                the browser.
-              </span>
-            </p>
           </div>
         </div>
       )}

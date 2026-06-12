@@ -12,14 +12,14 @@ import { openFile } from "./openFile";
 import { fileStats } from "./fileMeta";
 
 const FIXTURE = fileURLToPath(
-  new URL("../../test/data/small.mzpeak", import.meta.url),
+  new URL("../../test/data/example.mzpeak", import.meta.url),
 );
 
 describe("openFile — local File/Blob via BlobReader", () => {
   it("opens a Blob with numSpectra > 0", async () => {
     const bytes = await readFile(FIXTURE);
     // Simulate a browser File: wrap Buffer as Blob with a .name property.
-    const file = new File([bytes], "small.mzpeak", {
+    const file = new File([bytes], "example.mzpeak", {
       type: "application/octet-stream",
     });
     const reader = await openFile(file);
@@ -29,7 +29,7 @@ describe("openFile — local File/Blob via BlobReader", () => {
 
   it("returns a reader with a non-empty file index after openFile", async () => {
     const bytes = await readFile(FIXTURE);
-    const file = new File([bytes], "small.mzpeak", {
+    const file = new File([bytes], "example.mzpeak", {
       type: "application/octet-stream",
     });
     const reader = await openFile(file);

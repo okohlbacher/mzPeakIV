@@ -260,47 +260,67 @@
 .statusbar__dot b { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
 .statusbar__spacer { flex: 1; }
 
-/* ── Loader (pre-file state) ─────────────────────────────────────────────── */
-.loader { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--space-8); }
+/* ── Idle landing / loader ───────────────────────────────────────────────────
+   First-load idle = a bare, airy light column near the top (mzPeakExplorer's
+   starting page); `--dialog` = a contained card centred over the loaded app for
+   the "Open file" reopen and load-error cases. */
+.loader {
+  position: absolute; inset: 0; overflow: auto;
+  display: grid; place-items: start center; padding: 6vh var(--space-6) var(--space-8);
+}
+.loader--dialog { place-items: center; padding: var(--space-8); }
+
 .loader__card {
-  width: min(560px, 92%); background: var(--surface);
-  border: 1px solid var(--border-hairline); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-3); padding: var(--space-9);
-  display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--space-5);
+  width: 100%; max-width: 560px;
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--space-4);
 }
-.loader__logo { height: 40px; }
-.loader__h { font-size: var(--text-xl); font-weight: 600; color: var(--text-strong); }
-.loader__p { font-size: var(--text-sm); color: var(--text-muted); max-width: 40ch; line-height: var(--leading-normal); }
-.loader__note {
-  display: flex; align-items: flex-start; gap: var(--space-3);
-  margin: 0; max-width: 46ch; text-align: left;
-  font-size: var(--text-xs); color: var(--text-faint); line-height: var(--leading-normal);
+.loader__card--dialog {
+  width: min(560px, 92%);
+  background: var(--surface); border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-3); padding: var(--space-9);
 }
-.loader__note svg { flex-shrink: 0; margin-top: 1px; color: var(--success); }
-.loader__note strong { color: var(--text-muted); font-weight: 600; }
-.loader__download {
-  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted);
-  text-decoration: none; border-bottom: 1px dotted var(--border-strong);
-}
-.loader__download:hover { color: var(--accent); border-color: var(--accent); }
+
+.loader__logo { height: 62px; margin-bottom: var(--space-2); }
+.loader__h { margin: 0; font-size: 1.2rem; font-weight: var(--weight-semibold); color: var(--text-strong); }
+.loader__p { margin: 0 0 var(--space-2); font-size: var(--text-body); color: var(--text-muted); max-width: 46ch; line-height: var(--leading-normal); }
+
+/* Drop-zone (signature element) — follows the Explorer spec. */
 .drop {
-  width: 100%; border: var(--border-dashed) dashed var(--border-strong); border-radius: var(--radius-md);
-  background: var(--gray-25); padding: var(--space-8) var(--space-6); cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
-  color: var(--text-muted); transition: var(--transition-control);
+  width: 100%; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: var(--space-3);
+  border: var(--border-dashed) dashed var(--border-hairline); border-radius: var(--radius-lg);
+  background: var(--surface-sunken); color: var(--text-muted);
+  padding: 2.2rem 1rem; cursor: pointer; user-select: none;
+  font-size: var(--text-body); transition: var(--transition-control);
 }
 .drop:hover, .drop[data-over="true"] { border-color: var(--accent); background: var(--accent-subtle); color: var(--accent); }
 .drop strong { color: var(--text-body); }
-.loader__url { display: flex; gap: var(--space-3); width: 100%; }
-.loader__url .mz-input { flex: 1; }
-.loader__demos { display: flex; gap: var(--space-3); flex-wrap: wrap; justify-content: center; }
-.chip {
-  font-size: var(--text-xs); font-family: var(--font-mono); color: var(--text-body);
-  padding: var(--space-2) var(--space-4); background: var(--gray-50);
-  border: 1px solid var(--border-soft); border-radius: var(--radius-pill); cursor: pointer;
-  transition: var(--transition-control);
+.drop:hover strong, .drop[data-over="true"] strong { color: var(--accent); }
+
+/* Privacy reassurance strip — bordered soft row with the green shield. */
+.loader__privacy {
+  display: flex; align-items: center; gap: var(--space-3); margin: 0; text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm); color: var(--text-muted); line-height: var(--leading-snug);
 }
-.chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-subtle); }
+.loader__privacy svg { flex-shrink: 0; color: var(--success); }
+.loader__privacy strong { color: var(--text-body); font-weight: var(--weight-semibold); }
+
+/* Example actions — imaging demo (primary) + small example (secondary). */
+.loader__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); }
+
+.loader__download {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-xs); color: var(--text-muted); text-decoration: none;
+}
+.loader__download:hover { color: var(--accent); }
+
+.loader__hint { margin: 0; font-size: var(--text-xs); color: var(--text-muted); max-width: 46ch; line-height: var(--leading-normal); }
+
+.loader__url { display: flex; flex-wrap: wrap; gap: var(--space-3); width: 100%; max-width: 420px; }
+.loader__url .mz-input { flex: 1 1 180px; min-width: 0; } /* min-width:0 so it can shrink, not overflow */
 
 /* MultiChannel inputs (toolbar) */
 .mc-row { display: flex; align-items: center; gap: var(--space-3); }

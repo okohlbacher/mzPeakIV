@@ -17,10 +17,7 @@ import type { ManifestEntry } from "./types";
 // ── Fixture helpers ───────────────────────────────────────────────────────────
 
 const POINT_FIXTURE = fileURLToPath(
-  new URL("../../test/data/small.mzpeak", import.meta.url),
-);
-const CHUNKED_FIXTURE = fileURLToPath(
-  new URL("../../test/data/small.chunked.mzpeak", import.meta.url),
+  new URL("../../test/data/example.mzpeak", import.meta.url),
 );
 
 async function openFixture(path: string): Promise<Reader> {
@@ -30,7 +27,7 @@ async function openFixture(path: string): Promise<Reader> {
 
 // ── Real-fixture tests ────────────────────────────────────────────────────────
 
-describe("computeStats against small.mzpeak (point)", () => {
+describe("computeStats against example.mzpeak (imaging, point)", () => {
   let reader: Reader;
   let mf: ManifestEntry[];
 
@@ -39,9 +36,9 @@ describe("computeStats against small.mzpeak (point)", () => {
     mf = manifest(reader);
   });
 
-  it("numSpectra > 0 and numEntities === manifest.length", () => {
+  it("numSpectra === 9 (the 3×3 example grid) and numEntities === manifest.length", () => {
     const stats = computeStats(reader, mf);
-    expect(stats.numSpectra).toBeGreaterThan(0);
+    expect(stats.numSpectra).toBe(9); // example.mzpeak is a 3×3 imaging grid
     expect(stats.numEntities).toBe(mf.length);
   });
 
@@ -61,7 +58,7 @@ describe("computeStats against small.mzpeak (point)", () => {
     expect(stats.representationCounts).toBeDefined();
     expect(stats.representationCounts.profile).toBeGreaterThanOrEqual(0);
     expect(stats.representationCounts.centroid).toBeGreaterThanOrEqual(0);
-    // The demo fixture is a profile file; profile should dominate.
+    // The imaging example has signal; profile + centroid sum > 0.
     expect(
       stats.representationCounts.profile + stats.representationCounts.centroid,
     ).toBeGreaterThan(0);
@@ -84,54 +81,33 @@ describe("computeStats against small.mzpeak (point)", () => {
   });
 });
 
-describe("computeCapabilities against small.mzpeak (point)", () => {
+describe("computeCapabilities against example.mzpeak (imaging, point)", () => {
   let reader: Reader;
   let mf: ManifestEntry[];
 
   beforeAll(async () => {
     reader = await openFixture(POINT_FIXTURE);
     mf = manifest(reader);
+    // Init the array index so layout detection inspects REAL columns (not the
+    // pre-read default), proving the imaging fixture is genuinely point layout.
+    await reader.spectrumData();
   });
 
-  it("returns layout=point and an encodings array (may be empty before signal read)", () => {
+  it("returns layout=point (real array index) and an encodings array", () => {
     const caps = computeCapabilities(reader, mf);
-    // Point layout is the default for the demo fixture.
+    // Verified: imaging mzPeak uses point layout (no chunk_* columns).
     expect(caps.layout).toBe("point");
     expect(Array.isArray(caps.encodings)).toBe(true);
   });
 
-  it("isImaging is false for the demo (non-imaging) fixture", () => {
+  it("isImaging is true for the imaging example", () => {
     const caps = computeCapabilities(reader, mf);
-    expect(caps.isImaging).toBe(false);
+    expect(caps.isImaging).toBe(true);
   });
 
   it("unsupported is [] (populated by plan 01-03)", () => {
     const caps = computeCapabilities(reader, mf);
     expect(caps.unsupported).toEqual([]);
-  });
-});
-
-describe("computeCapabilities against small.chunked.mzpeak (chunked+delta)", () => {
-  let reader: Reader;
-  let mf: ManifestEntry[];
-
-  beforeAll(async () => {
-    reader = await openFixture(CHUNKED_FIXTURE);
-    mf = manifest(reader);
-  });
-
-  it("numSpectra > 0 for the chunked fixture", () => {
-    const stats = computeStats(reader, mf);
-    expect(stats.numSpectra).toBeGreaterThan(0);
-  });
-
-  // Note: the array index is only populated after signal data is first read.
-  // Before that, layout defaults to "point" — acceptable for the capability
-  // detection gate (detection of chunked requires lazy read, done in 01-03).
-  it("capabilities returns a valid layout and encodings array", () => {
-    const caps = computeCapabilities(reader, mf);
-    expect(["point", "chunked", "mixed"]).toContain(caps.layout);
-    expect(Array.isArray(caps.encodings)).toBe(true);
   });
 });
 

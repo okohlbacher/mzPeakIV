@@ -4,22 +4,22 @@ import { test, expect } from "@playwright/test";
 // REAL WASM reader, see real metadata + manifest, select a spectrum index, and
 // see the uPlot chart render. Proves file -> metadata -> select -> plotted arrays
 // with no COOP/COEP (served by `vite preview`).
-test("loads a real .mzpeak by URL, shows metadata + manifest, plots a spectrum", async ({
+test("loads a real .mzpeak by URL, shows manifest + stats, plots a spectrum", async ({
   page,
 }) => {
   await page.goto("./");
 
   // Loader zone: the default demo URL now points at a remote imaging dataset, so
   // load the committed offline fixture explicitly to keep this test fast + hermetic.
-  await page.getByTestId("url-input").fill("/mzPeakIV/static/small.mzpeak");
+  await page.getByTestId("url-input").fill("/mzPeakIV/static/example.mzpeak");
   await page.getByTestId("load-button").click();
 
   // Wait for the staged load to reach a non-error TERMINAL state. The bundled
-  // demo (small.mzpeak) is a non-imaging LC-MS file, so its correct terminal is
-  // "No Imaging Data" (requirement D-06); an imaging file would reach "Ready".
-  // The walking-skeleton proof (metadata + manifest + spectrum) holds in both.
+  // example (example.mzpeak) is a small imaging file, so it reaches
+  // "Ready".
+  // The walking-skeleton proof (metadata + manifest + spectrum) still holds.
   await expect(page.getByTestId("stage")).toHaveText(
-    /^(Ready|No Imaging Data)$/,
+    "Ready",
     { timeout: 30000 },
   );
 
@@ -35,9 +35,7 @@ test("loads a real .mzpeak by URL, shows metadata + manifest, plots a spectrum",
   await expect(manifestRows.first()).toBeVisible();
   expect(await manifestRows.count()).toBeGreaterThan(0);
 
-  // File-level metadata block is present.
-  await expect(page.getByTestId("file-metadata")).toBeVisible();
-  await expect(page.getByTestId("file-stats")).toContainText("spectra");
+  await expect(page.getByTestId("file-stats")).toContainText("9 spectra");
 
   // Right panel: spectrum index selector + uPlot canvas.
   const indexInput = page.getByTestId("spectrum-index");

@@ -1,10 +1,10 @@
 /**
- * Real-reader integration tests for the store's non-imaging path.
+ * Real-reader integration tests for the store's load path.
  *
  * Unlike store.test.ts (which mocks the reader boundary), these tests use the
- * actual vendored mzpeakts reader against the bundled small.mzpeak fixture —
- * the same file used by the Phase-1 e2e tests. This proves the non-imaging
- * branch in the real reader path (not just the mocked branch).
+ * actual vendored mzpeakts reader against the bundled example.mzpeak imaging
+ * fixture — the same small imaging file used by the e2e tests. This proves the
+ * real reader path (not just the mocked branch).
  *
  * Separate file so vi.mock() in store.test.ts doesn't interfere.
  */
@@ -17,9 +17,9 @@ import path from "node:path";
 import { useStore } from "./store";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURE = path.resolve(__dirname, "../../test/data/small.mzpeak");
+const FIXTURE = path.resolve(__dirname, "../../test/data/example.mzpeak");
 
-describe("store integration — real small.mzpeak (non-imaging fixture)", () => {
+describe("store integration — real example.mzpeak (imaging fixture)", () => {
   beforeEach(() => {
     useStore.setState({
       fileMeta: null,
@@ -34,7 +34,7 @@ describe("store integration — real small.mzpeak (non-imaging fixture)", () => 
     });
   });
 
-  it.skip("loads small.mzpeak: stage=ready, grid=null, error=null, isImaging=false (D-06)", async () => {
+  it.skip("loads example.mzpeak: stage=ready, grid set, error=null, isImaging=true", async () => {
     // Phase 5 (Plan 05-03) moved the mzpeakts reader into a Web Worker.
     // store.ts is now a thin dispatcher — openFile() posts a loadFile message
     // and awaits a WorkerResponse. In Node test environment, Worker is a
@@ -51,15 +51,15 @@ describe("store integration — real small.mzpeak (non-imaging fixture)", () => 
     void FIXTURE; // suppress unused-import warning
     const bytes = readFileSync(FIXTURE);
     const blob = new Blob([bytes], { type: "application/octet-stream" });
-    const file = new File([blob], "small.mzpeak");
+    const file = new File([blob], "example.mzpeak");
 
     await useStore.getState().openFile(file);
 
     const state = useStore.getState();
     expect(state.stage).toBe("ready");
     expect(state.error).toBeNull();
-    expect(state.grid).toBeNull();
-    expect(state.capabilities?.isImaging).toBe(false);
+    expect(state.grid).not.toBeNull();
+    expect(state.capabilities?.isImaging).toBe(true);
     expect(state.manifest.length).toBeGreaterThan(0);
     expect(state.stats?.numSpectra).toBeGreaterThan(0);
   });

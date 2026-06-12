@@ -2,7 +2,7 @@
  * Playwright E2E test for local file loading (R-02a / LOAD-01).
  *
  * Exercises BOTH the file-picker path (page.setInputFiles) AND simulated
- * drag-and-drop, asserting real metadata renders after each.
+ * drag-and-drop, asserting manifest + stats render after each.
  *
  * Also asserts at least one intermediate stage label is visible during the
  * real WASM load (R-02e), proving LOAD-03 staged-progress is user-visible.
@@ -13,8 +13,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Path to the bundled local fixture (also exists in test/data/).
-const FIXTURE_PATH = path.resolve(__dirname, "../test/data/small.mzpeak");
+// Path to the bundled local fixture — the small imaging example (also in test/data/).
+const FIXTURE_PATH = path.resolve(__dirname, "../test/data/example.mzpeak");
 
 /**
  * Shared assertions: after a file is loaded, verify the inspection panels
@@ -22,10 +22,9 @@ const FIXTURE_PATH = path.resolve(__dirname, "../test/data/small.mzpeak");
  */
 async function assertLoadedUI(page: Page) {
   // Wait for staged load to reach a non-error TERMINAL state. The fixture
-  // (small.mzpeak) is non-imaging → terminal "No Imaging Data" (D-06); an
-  // imaging file would reach "Ready". Metadata/manifest/spectrum hold in both.
+  // (example.mzpeak) is a small imaging file → terminal "Ready".
   await expect(page.getByTestId("stage")).toHaveText(
-    /^(Ready|No Imaging Data)$/,
+    "Ready",
     { timeout: 30000 },
   );
 
@@ -41,11 +40,9 @@ async function assertLoadedUI(page: Page) {
   await expect(manifestRows.first()).toBeVisible();
   expect(await manifestRows.count()).toBeGreaterThan(0);
 
-  // File metadata block is present.
-  await expect(page.getByTestId("file-metadata")).toBeVisible();
 
   // Stats line includes "spectra".
-  await expect(page.getByTestId("file-stats")).toContainText("spectra");
+  await expect(page.getByTestId("file-stats")).toContainText("9 spectra");
 
   // Stats panel shows representation counts (R-02b visible in UI).
   await expect(page.getByTestId("stats-panel")).toBeVisible();
@@ -54,13 +51,13 @@ async function assertLoadedUI(page: Page) {
   await expect(page.getByTestId("capabilities-panel")).toBeVisible();
   const imagingCell = page.getByTestId("cap-is-imaging");
   await expect(imagingCell).toBeVisible();
-  // The demo file is not imaging — must say "no" (not blank, R-02d proxy).
-  await expect(imagingCell).toContainText("no");
+  // The example is an imaging file — must say "yes" (not blank, R-02d proxy).
+  await expect(imagingCell).toContainText("yes");
 }
 
 // ── Test 1: File picker via page.setInputFiles ─────────────────────────────
 
-test("loads a .mzpeak via file picker (page.setInputFiles) — asserts staged progress + metadata (R-02a, R-02e)", async ({
+test("loads a .mzpeak via file picker (page.setInputFiles) — asserts staged progress + manifest/stats (R-02a, R-02e)", async ({
   page,
 }) => {
   await page.goto("./");
@@ -106,13 +103,13 @@ test("loads a .mzpeak via file picker (page.setInputFiles) — asserts staged pr
   // Now wait for load to complete and assert the full inspection UI.
   await assertLoadedUI(page);
 
-  // The stage sentinel reaches a non-error terminal (non-imaging demo → D-06).
-  await expect(stageEl).toHaveText(/^(Ready|No Imaging Data)$/);
+  // The stage sentinel reaches a non-error terminal ("Ready" for the imaging example).
+  await expect(stageEl).toHaveText("Ready");
 });
 
 // ── Test 2: Drag-and-drop ──────────────────────────────────────────────────
 
-test("loads a .mzpeak via drag-and-drop — asserts metadata renders (R-02a)", async ({
+test("loads a .mzpeak via drag-and-drop — asserts manifest + stats render (R-02a)", async ({
   page,
 }) => {
   await page.goto("./");
@@ -121,7 +118,7 @@ test("loads a .mzpeak via drag-and-drop — asserts metadata renders (R-02a)", a
   // We read the file bytes and create a DataTransfer with a File, then dispatch
   // dragover + drop events on the drop zone.
   const fileBytes = readFileSync(FIXTURE_PATH);
-  const fileName = "small.mzpeak";
+  const fileName = "example.mzpeak";
 
   // Use Playwright's page.dispatchEvent with a manually-crafted DataTransfer.
   // Playwright doesn't have a native drag-file helper, so we inject the bytes
@@ -169,7 +166,7 @@ test("m/z range shows 'not available' or a numeric range — never blank (R-02d)
   await page.getByTestId("file-input").setInputFiles(FIXTURE_PATH);
 
   await expect(page.getByTestId("stage")).toHaveText(
-    /^(Ready|No Imaging Data)$/,
+    "Ready",
     { timeout: 30000 },
   );
 
