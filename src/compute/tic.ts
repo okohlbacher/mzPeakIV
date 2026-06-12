@@ -27,7 +27,7 @@ interface XicPointLike {
   // the `Number.isFinite` guard coerces any non-number element to 0.
   dataArrays: Record<
     string,
-    ArrayLike<number> | ArrayLike<string> | undefined
+    ArrayLike<number> | ArrayLike<string> | ArrayLike<bigint> | undefined
   >;
 }
 
